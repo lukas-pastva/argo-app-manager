@@ -27,12 +27,15 @@ app.get("/api/apps", async (req, res) => {
     ? [ path.resolve(req.query.file) ]
     : await listAppFiles();
 
-  const docs = [];
+  const flat = [];
   for (const f of target) {
     const txt = await fs.readFile(f, "utf8");
-    docs.push(...yaml.loadAll(txt));
+    const y = yaml.load(txt) || {};
+    (y.appProjects || []).forEach(proj =>
+      (proj.applications || []).forEach(app =>
+        flat.push({ project: proj.name, file: f, app })));
   }
-  res.json(docs);
+  res.json(flat);
 });
 
 app.get("/api/search", async (req, res) => {
