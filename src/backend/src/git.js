@@ -28,6 +28,8 @@ export async function ensureRepo() {
 
   spawnSync("git", ["clone", "--depth", "1", "--branch", branch,
     cfg.gitRepo, DIR], { stdio: "inherit" });
+    
+  console.log("[DEBUG] Git repo cloned to", DIR);
 
   return DIR;
 }

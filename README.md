@@ -1,59 +1,81 @@
-# Argo Helm Toggler 🚀
+# Argo Helm Toggler 🚀
 
-Argo Helm Toggler is a **tiny Git‑based web UI** that lets you add / remove Helm charts from an *app‑of‑apps* repository and immediately trigger an Argo Workflows pipeline to deploy the change.
+A **tiny Git‑based web UI** that lets you add / remove Helm charts in your GitOps
+*app‑of‑apps* repo and trigger an Argo Workflow (or any webhook).  
+One container = React + Express + Helm.
+
+---
+
+## ✨ Features
+
+|  |  |
+|--|--|
+| 🔍 **ArtifactHub search** | type three letters, pick a chart & version |
+| ✍️ **YAML diff editor** | only your changes are stored; defaults stay in the chart |
+| 🗂 **Tabs per cluster/env** | each `app‑of‑apps*.yaml` file becomes a tab |
+| 🌑 **Dark / Light / Auto** | theme switch with local persistence |
+| 🗑 **One‑click delete** | removes an Application via webhook |
+| 🛠 **Pure Git & Helm** | UI needs **no** K8s credentials |
 
 ![UI screenshot](docs/screenshot.png)
 
 ---
 
-## Features
-
-|                                   | |
-|-----------------------------------|--------------------------------------------------------------|
-| 🔍 **ArtifactHub search**         | Type three letters, pick a chart & version                   |
-| ✍️ **YAML diff editor**           | Only your changes are stored; defaults stay in the chart     |
-| 🗂 **Tabs per cluster**           | Each `app-of-apps*.yaml` file gets its own tab               |
-| 🌑 **Dark / Light / Auto**        | One‑click theme switch with local persistence                |
-| 🗑 **One‑click delete**           | Removes an Application (after confirmation) via webhook      |
-| 🛠 **Pure Git & Helm**            | No Kubernetes credentials needed for the UI                  |
-
----
-
-## Quick Start (stand‑alone Docker)
+## 🚀 Quick start (stand‑alone Docker)
 
 ```bash
 docker build -t argo-helm-toggler .
-docker run -p 8080:8080   -e GIT_REPO_SSH=git@github.com:my-org/argo-apps.git   -e GIT_SSH_KEY="$(cat ~/.ssh/id_ed25519)"   -e WF_WEBHOOK_URL=https://argo.example.com/api/helm-deploy   argo-helm-toggler
+
+docker run -p 8080:8080 \
+  -e GIT_REPO_SSH=git@github.com:my-org/argo-apps.git \
+  -e GIT_SSH_KEY="$(cat ~/.ssh/id_ed25519)" \
+  -e WF_WEBHOOK_URL=https://argo.example.com/api/helm-deploy \
+  # optional overrides ⤵
+  -e APPS_GLOB="stage-*.yaml"  \
+  argo-helm-toggler
 ```
 
 Open <http://localhost:8080>
 
-> **Note** – you only need *read‑only* access to the repo inside the UI
-> container because all writes happen via the workflow script.
+> Only a *read‑only* clone is kept inside the UI container – all **writes**
+> happen in the CI job that runs `handle-helm-deploy.sh`.
 
 ---
 
-## Environment Variables
+## 🌡 Environment variables
 
-| Variable | Required | Example | Purpose |
-|----------|----------|---------|---------|
-| **`GIT_REPO_SSH`** | ✅ | `git@github.com:org/argo-apps.git` | GitOps repo to clone |
-| `GIT_BRANCH` |  | `main` | Branch to clone / auto‑pull |
-| **`GIT_SSH_KEY`** or `GIT_SSH_KEY_B64` | ✅ | *(PEM or base64)* | Private key for the clone |
-| **`WF_WEBHOOK_URL`** | ✅ | `https://argo/api/helm-deploy` | Deploy webhook |
-| `WF_DELETE_WEBHOOK_URL` |  | – | Delete webhook (defaults to `/delete`) |
-| `WF_TOKEN` |  | `bearer‑abc123` | Optional bearer token for both webhooks |
-| `PORT` |  | `8080` | Port UI listens on |
+### Backend container
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| **`GIT_REPO_SSH`** | — | GitOps repo to clone (read‑only) |
+| `GIT_BRANCH` | `main` | Branch to pull |
+| **`GIT_SSH_KEY`** or `GIT_SSH_KEY_B64` | — | Private key (plain or base64) |
+| **`WF_WEBHOOK_URL`** | — | Deploy webhook URL |
+| `WF_DELETE_WEBHOOK_URL` | `${WF_WEBHOOK_URL}/delete` | Delete webhook |
+| `WF_TOKEN` | — | Bearer token added to both webhooks |
+| `PORT` | `8080` | Port UI listens on |
+| `APPS_GLOB` | `app-of-apps*.y?(a)ml` | Glob the backend scans for (tabs) |
+
+### Helper script `handle-helm-deploy.sh`
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `APPS_DIR` | `clusters` | Base folder that contains app‑of‑apps files |
+| `APP_FILE_GLOB` | value of `APPS_GLOB` | File‑mask when locating/creating the YAML |
+| `VALUES_SUBDIR` | `values` | Sub‑folder (next to YAML) for `<release>.yaml` overrides |
+| `PUSH_BRANCH` | `main` | `main`, a fixed name, or `new` (creates `helm-<rel>-<stamp>`) |
 
 ---
 
-## Webhook Payloads
+## 🛰 Webhook payloads
 
-Deploy (POST `WF_WEBHOOK_URL`)
+Deploy (POST `WF_WEBHOOK_URL`)
+
 ```json
 {
   "chart": "grafana",
-  "repo": "https://charts.bitnami.com/bitnami",
+  "repo":  "https://charts.bitnami.com/bitnami",
   "version": "7.3.2",
   "release": "grafana",
   "namespace": "monitoring",
@@ -61,80 +83,41 @@ Deploy (POST `WF_WEBHOOK_URL`)
 }
 ```
 
-Delete (POST `WF_DELETE_WEBHOOK_URL`)
+Delete (POST `WF_DELETE_WEBHOOK_URL`)
+
 ```json
-{
-  "release": "grafana",
-  "namespace": "monitoring"
-}
+{ "release": "grafana", "namespace": "monitoring" }
 ```
 
 ---
 
-## `handle-helm-deploy.sh`
+## `scripts/handle-helm-deploy.sh`
 
-For CI / Argo Workflows a helper script lives in `scripts/handle-helm-deploy.sh`:
+* Updates/creates the *app‑of‑apps* YAML (glob + dir overridable)
+* Saves values file under `$APPS_DIR/$VALUES_SUBDIR/<release>.yaml`
+* `helm pull` → `charts/external/<owner>/<chart>/<version>/`
+* Commits & pushes to `PUSH_BRANCH`
 
-* Updates / creates the matching `app-of-apps` YAML
-* Saves values file under `values/<release>.yaml`
-* `helm pull` → `charts/external/<owner>/<chart>/<ver>/`
-* Commits & pushes to `main`, a custom branch, **or a fresh PR branch**  
-  (controlled by `PUSH_BRANCH=main|<name>|new`)
+Typical usage in CI:
 
 ```bash
-curl -s "$WF_WEBHOOK_URL" | PUSH_BRANCH=new ./handle-helm-deploy.sh
+curl -s "${WF_WEBHOOK_URL}" \
+  | APPS_DIR=clusters/prod VALUES_SUBDIR=helm-values \
+    APP_FILE_GLOB="prod-apps.yaml" PUSH_BRANCH=new \
+    ./scripts/handle-helm-deploy.sh
 ```
-
-See the header comments inside the script for full behaviour.
 
 ---
 
 ## Dev mode
 
 ```bash
-# Front‑end hot reload
-cd frontend && npm run dev
-# Back‑end hot reload
-cd backend && nodemon src/index.js
+# Front‑end hot‑reload
+cd src/frontend && npm run dev
+# Back‑end hot‑reload (requires nodemon)
+cd src/backend  && nodemon src/index.js
 ```
 
 ---
 
-## Roadmap
-
-- [ ] Validation against chart `values.schema.json`
-- [ ] Per‑user RBAC (GitHub SSO)
-- [ ] Inline pod / service links once deployed
-
----
-
-© 2025 Argo Helm Toggler • MIT‑licensed
-
-```
-argo-helm-toggler/
-├── .dockerignore
-├── Dockerfile
-├── README.md
-├── backend/
-│   ├── package.json
-│   └── src/
-│       ├── argo.js
-│       ├── config.js
-│       ├── diff.js
-│       ├── git.js
-│       └── index.js
-└── frontend/
-    ├── index.html
-    ├── package.json
-    ├── vite.config.js
-    └── src/
-        ├── main.jsx
-        ├── App.jsx
-        ├── App.css
-        └── components/
-            ├── Tabs.jsx
-            ├── ThemeToggle.jsx
-            ├── AppsList.jsx
-            ├── ChartSearch.jsx
-            └── ValuesEditor.jsx
-```
+© 2025 Argo Helm Toggler • MIT

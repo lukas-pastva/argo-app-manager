@@ -6,7 +6,8 @@ export default {
   gitBranch: process.env.GIT_BRANCH || "main",
   gitKey:    process.env.GIT_SSH_KEY || process.env.GIT_SSH_KEY_B64,
 
-  appsGlob:  "app-of-apps*.y?(a)ml",
+  /* override with APPS_GLOB – e.g. "my-cluster*.yaml" */
+  appsGlob:  process.env.APPS_GLOB || "app-of-apps*.y?(a)ml",
 
   webhookUrl:       process.env.WF_WEBHOOK_URL,
   deleteWebhookUrl: process.env.WF_DELETE_WEBHOOK_URL ||

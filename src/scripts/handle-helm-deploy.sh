@@ -8,10 +8,10 @@
 set -euo pipefail
 
 # ════════════════ CONFIGURE ═══════════════════════════════════════════════════
-APPS_DIR="clusters"                          # 📂 where app-of-apps YAML lives
-VALUES_SUBDIR="values"                       # 📂 written next to that YAML
+APPS_DIR="${APPS_DIR:-clusters}"             # 📂 override with env APPS_DIR
+VALUES_SUBDIR="${VALUES_SUBDIR:-values}"     # 📂 override with env VALUES_SUBDIR
+APP_FILE_PATTERN="${APP_FILE_GLOB:-app-of-apps*.y?(a)ml}"
 CHARTS_ROOT="charts/external"                # 📂 extracted chart storage root
-APP_FILE_PATTERN="app-of-apps*.y?(a)ml"      # glob to pick the file
 
 PUSH_BRANCH="${PUSH_BRANCH:-main}"           # main | <branch> | new
 COMMIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-helm-toggler}"
