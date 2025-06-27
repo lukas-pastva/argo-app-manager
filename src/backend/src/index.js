@@ -17,13 +17,17 @@ app.use(helmet());
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static("public"));
 
-/* ─── file list (unchanged) ─────────────────────────────────────── */
+/* ────────────────────────────────────────────────────────── */
+/* 1.  List YAML files                                        */
+/* ────────────────────────────────────────────────────────── */
 app.get("/api/files", async (_req, res) => {
   const full = await listAppFiles();
   res.json(full.map((p) => path.resolve(p)));
 });
 
-/* ─── apps list ⇢ flattened appProjects/applications ────────────── */
+/* ────────────────────────────────────────────────────────── */
+/* 2.  Flatten appProjects → applications[]                   */
+/* ────────────────────────────────────────────────────────── */
 app.get("/api/apps", async (req, res) => {
   const targets = req.query.file
     ? [path.resolve(req.query.file)]
@@ -41,29 +45,45 @@ app.get("/api/apps", async (req, res) => {
   res.json(flat);
 });
 
-/* ─── ArtifactHub proxy (unchanged except encode) ──────────────── */
+/* ────────────────────────────────────────────────────────── */
+/* 3.  ArtifactHub search (≥ 4 chars, safe mapping)           */
+/* ────────────────────────────────────────────────────────── */
 app.get("/api/search", async (req, res) => {
-  const { q } = req.query;
-  if (!q) return res.status(400).json({ error: "q required" });
+  const q = (req.query.q || "").trim();
+  if (q.length < 4)
+    return res.status(400).json({ error: "query must be ≥ 4 characters" });
 
-  const { data } = await axios.get(
-    "https://artifacthub.io/api/v1/packages/search",
-    { params: { kind: 0, limit: 20, ts_query_web: q } }
-  );
-  res.json(
-    data.packages.map((p) => ({
-      name: p.name,
-      repo: p.repo.url,
-      version: p.version,
-      displayName: p.displayName,
-      logo: p.logoImageId
-        ? `https://artifacthub.io/image/${p.logoImageId}`
-        : null,
-    }))
-  );
+  const url =
+    "https://artifacthub.io/api/v1/packages/search?kind=0&limit=20" +
+    `&ts_query_web=${encodeURIComponent(q)}`;
+
+  /* ---- DEBUG curl ---- */
+  console.log(`[DEBUG] curl -s "${url}"`);
+
+  try {
+    const { data } = await axios.get(url);
+    const pkgs = data.packages || [];
+
+    res.json(
+      pkgs.map((p) => ({
+        name       : p.name,
+        repo       : p.repo?.url || p.repository?.url || "",   // ← guard
+        version    : p.version,
+        displayName: p.displayName,
+        logo       : p.logoImageId
+          ? `https://artifacthub.io/image/${p.logoImageId}`
+          : null,
+      }))
+    );
+  } catch (e) {
+    console.error("[ArtifactHub]", e.message);
+    res.status(e.response?.status || 500).json({ error: "ArtifactHub error" });
+  }
 });
 
-/* ─── insert / delete endpoints (unchanged) ─────────────────────── */
+/* ────────────────────────────────────────────────────────── */
+/* 4.  Create / update app via webhook                        */
+/* ────────────────────────────────────────────────────────── */
 app.post("/api/apps", async (req, res) => {
   const {
     chart,
@@ -72,7 +92,7 @@ app.post("/api/apps", async (req, res) => {
     release,
     namespace,
     userValuesYaml,
-    project = namespace,          // NEW: pass-through for helper script
+    project = namespace,
   } = req.body;
 
   if (!chart || !repo || !release || !namespace)
@@ -85,7 +105,8 @@ app.post("/api/apps", async (req, res) => {
     "--version",
     version,
   ]);
-  if (helm.status !== 0) return res.status(500).send(helm.stderr.toString());
+  if (helm.status !== 0)
+    return res.status(500).send(helm.stderr.toString());
 
   const delta = deltaYaml(helm.stdout.toString(), userValuesYaml);
   await triggerWebhook({
@@ -94,12 +115,15 @@ app.post("/api/apps", async (req, res) => {
     version,
     release,
     namespace,
-    project,          // forward untouched
+    project,
     values_yaml: delta,
   });
   res.json({ ok: true });
 });
 
+/* ────────────────────────────────────────────────────────── */
+/* 5.  Delete                                                 */
+/* ────────────────────────────────────────────────────────── */
 app.post("/api/apps/delete", async (req, res) => {
   const { release, namespace } = req.body || {};
   if (!release || !namespace)
@@ -111,7 +135,7 @@ app.post("/api/apps/delete", async (req, res) => {
   res.json({ ok: true });
 });
 
-/* ─── start ─────────────────────────────────────────────────────── */
+/* ────────────────────────────────────────────────────────── */
 app.listen(cfg.port, () =>
   console.log(`✔︎ argo-helm-toggler backend listening on ${cfg.port}`)
 );
