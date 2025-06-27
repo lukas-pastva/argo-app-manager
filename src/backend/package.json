@@ -5,7 +5,7 @@
   "main": "src/index.js",
   "dependencies": {
     "axios": "^1.7.2",
-    "deep-object-diff": "^2.0.5",
+    "deep-object-diff": "^1.1.2",
     "express": "^4.19.2",
     "fast-glob": "^3.3.2",
     "helmet": "^7.0.0",
