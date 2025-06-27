@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from "react";
 
-/* Backend returns  [{ project, file, app }]                       */
+const FETCH_ICONS = false;            // ← set to true to re-enable look-ups
+
 export default function AppsList({ file }) {
   const [apps,  setApps]  = useState([]);
-  const [icons, setIcons] = useState({});          // key → logo URL
+  const [icons, setIcons] = useState({});   // key → imgURL | false (= tried)
 
-  /* ─── load apps for the active YAML file ─────────────────────── */
+  /* ─── YAML → apps list ───────────────────────────────────────── */
   useEffect(() => {
     if (!file) return;
     fetch(`/api/apps?file=${encodeURIComponent(file)}`)
@@ -13,33 +14,36 @@ export default function AppsList({ file }) {
       .then(setApps);
   }, [file]);
 
-  /* ─── lazily resolve logos – guard against empty / short names ─ */
+  /* ─── (optional) logo fetch with “try only once” guard ───────── */
   useEffect(() => {
+    if (!FETCH_ICONS) return;
+
     apps.forEach(({ app }) => {
-      const chart = app.chart;
-      if (!chart || chart.length < 4) return;       // skip undefined / short
-      const key = `${app.repoURL}/${chart}`;
-      if (icons[key]) return;                      // already cached
+      const { repoURL, chart } = app;
+      if (!chart || chart.length < 4) return;       // skip short names
+
+      const key = `${repoURL}/${chart}`;
+      if (icons[key] !== undefined) return;        // already done (true/false)
 
       fetch(`/api/search?q=${encodeURIComponent(chart)}`)
         .then((r) => r.json())
         .then((arr) => {
           const hit = arr.find((p) => p.name === chart);
-          setIcons((m) => ({ ...m, [key]: hit?.logo }));
+          setIcons((m) => ({ ...m, [key]: hit?.logo || false }));
         })
-        .catch(() => {/* ignore network errors */});
+        .catch(() => setIcons((m) => ({ ...m, [key]: false }))); // remember fail
     });
   }, [apps, icons]);
 
-  /* ─── delete wrapper ─────────────────────────────────────────── */
-  async function del(release, project) {
-    if (!window.confirm(`Delete ${release} (${project})?`)) return;
+  /* ─── delete helper ──────────────────────────────────────────── */
+  async function del(name, project) {
+    if (!window.confirm(`Delete ${name} (${project})?`)) return;
     await fetch("/api/apps/delete", {
       method : "POST",
       headers: { "Content-Type": "application/json" },
-      body   : JSON.stringify({ release, namespace: project }),
+      body   : JSON.stringify({ release: name, namespace: project }),
     });
-    setApps((a) => a.filter(({ app }) => app.name !== release));
+    setApps((a) => a.filter(({ app }) => app.name !== name));
   }
 
   /* ─── render ─────────────────────────────────────────────────── */
@@ -51,11 +55,12 @@ export default function AppsList({ file }) {
       <div className="apps-list">
         {apps.map(({ project, app }) => {
           const { name, repoURL, chart } = app;
-          const key = `${repoURL}/${chart}`;
+          const key  = `${repoURL}/${chart}`;
+          const logo = icons[key];
 
           return (
             <div className="app-card" key={project + "/" + name}>
-              {icons[key] ? <img src={icons[key]} alt="" /> : <span>📦</span>}
+              {logo ? <img src={logo} alt="" /> : <span>📦</span>}
 
               <div>
                 <span className="name">{name}</span>

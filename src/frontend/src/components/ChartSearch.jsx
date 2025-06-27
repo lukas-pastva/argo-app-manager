@@ -1,24 +1,20 @@
 import React, { useState } from "react";
 
-/* Starts searching ArtifactHub only after ≥ 4 characters */
 export default function ChartSearch({ onSelect }) {
-  const [q, setQ]   = useState("");
+  const [q,   setQ]   = useState("");
   const [res, setRes] = useState([]);
-  const [load, setLoad] = useState(false);
+  const [load,setLoad]= useState(false);
 
   async function search(t) {
     setQ(t);
-    if (t.trim().length < 4) {
-      setRes([]);
-      return;
-    }
+    if (t.length < 4) { setRes([]); return; }      // ← 4-char gate
+
     setLoad(true);
-    try {
-      const r = await fetch(`/api/search?q=${encodeURIComponent(t.trim())}`);
-      setRes(await r.json());
-    } finally {
-      setLoad(false);
-    }
+    const r = await fetch(`/api/search?q=${encodeURIComponent(t)}`).then((r) =>
+      r.json()
+    );
+    setRes(r);
+    setLoad(false);
   }
 
   return (
@@ -26,7 +22,7 @@ export default function ChartSearch({ onSelect }) {
       <div className="search-box">
         <input
           className="search-input"
-          placeholder="Search chart (≥4 chars, e.g. grafana)…"
+          placeholder="Search chart (e.g. grafana)…"
           value={q}
           onChange={(e) => search(e.target.value)}
         />
