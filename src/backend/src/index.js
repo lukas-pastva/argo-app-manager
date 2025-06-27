@@ -46,38 +46,47 @@ app.get("/api/apps", async (req, res) => {
 });
 
 /* ────────────────────────────────────────────────────────── */
-/* 3.  ArtifactHub search (≥ 4 chars, safe mapping)           */
+/* 3.  ArtifactHub search with 1-h cache                      */
 /* ────────────────────────────────────────────────────────── */
+const searchCache = new Map();           // q → { ts, data }
+const CACHE_TTL_MS = 60 * 60 * 1000;     // 1 hour
+
 app.get("/api/search", async (req, res) => {
   const q = (req.query.q || "").trim();
   if (q.length < 4)
     return res.status(400).json({ error: "query must be ≥ 4 characters" });
 
+  /* serve from cache if fresh */
+  const cached = searchCache.get(q);
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+    return res.json(cached.data);
+  }
+
   const url =
     "https://artifacthub.io/api/v1/packages/search?kind=0&limit=20" +
     `&ts_query_web=${encodeURIComponent(q)}`;
 
-  /* ---- DEBUG curl ---- */
   console.log(`[DEBUG] curl -s "${url}"`);
 
   try {
-    const { data } = await axios.get(url);
+    const { data } = await axios.get(url, { timeout: 10_000 });
     const pkgs = data.packages || [];
 
-    res.json(
-      pkgs.map((p) => ({
-        name       : p.name,
-        repo       : p.repo?.url || p.repository?.url || "",   // ← guard
-        version    : p.version,
-        displayName: p.displayName,
-        logo       : p.logoImageId
-          ? `https://artifacthub.io/image/${p.logoImageId}`
-          : null,
-      }))
-    );
+    const mapped = pkgs.map((p) => ({
+      name       : p.name,
+      repo       : p.repo?.url || p.repository?.url || "",
+      version    : p.version,
+      displayName: p.displayName,
+      logo       : p.logoImageId
+        ? `https://artifacthub.io/image/${p.logoImageId}`
+        : null,
+    }));
+
+    searchCache.set(q, { ts: Date.now(), data: mapped });
+    res.json(mapped);
   } catch (e) {
     console.error("[ArtifactHub]", e.message);
-    res.status(e.response?.status || 500).json({ error: "ArtifactHub error" });
+    res.status(e.response?.status || 502).json({ error: "ArtifactHub error" });
   }
 });
 

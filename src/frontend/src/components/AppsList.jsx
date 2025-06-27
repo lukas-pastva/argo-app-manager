@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from "react";
 
-/* Expects backend to return [{ project, file, app }] */
+/* Backend returns  [{ project, file, app }]                       */
 export default function AppsList({ file }) {
-  const [apps, setApps]   = useState([]);
-  const [icons, setIcons] = useState({});
+  const [apps,  setApps]  = useState([]);
+  const [icons, setIcons] = useState({});          // key → logo URL
 
-  /* load apps for active file */
+  /* ─── load apps for the active YAML file ─────────────────────── */
   useEffect(() => {
     if (!file) return;
     fetch(`/api/apps?file=${encodeURIComponent(file)}`)
@@ -13,21 +13,25 @@ export default function AppsList({ file }) {
       .then(setApps);
   }, [file]);
 
-  /* lazy-load logos */
+  /* ─── lazily resolve logos – guard against empty / short names ─ */
   useEffect(() => {
     apps.forEach(({ app }) => {
-      const key = `${app.repoURL}/${app.chart}`;
-      if (icons[key]) return;
-      fetch(`/api/search?q=${encodeURIComponent(app.chart)}`)
+      const chart = app.chart;
+      if (!chart || chart.length < 4) return;       // skip undefined / short
+      const key = `${app.repoURL}/${chart}`;
+      if (icons[key]) return;                      // already cached
+
+      fetch(`/api/search?q=${encodeURIComponent(chart)}`)
         .then((r) => r.json())
         .then((arr) => {
-          const hit = arr.find((p) => p.name === app.chart);
+          const hit = arr.find((p) => p.name === chart);
           setIcons((m) => ({ ...m, [key]: hit?.logo }));
-        });
+        })
+        .catch(() => {/* ignore network errors */});
     });
   }, [apps, icons]);
 
-  /* delete wrapper */
+  /* ─── delete wrapper ─────────────────────────────────────────── */
   async function del(release, project) {
     if (!window.confirm(`Delete ${release} (${project})?`)) return;
     await fetch("/api/apps/delete", {
@@ -38,6 +42,7 @@ export default function AppsList({ file }) {
     setApps((a) => a.filter(({ app }) => app.name !== release));
   }
 
+  /* ─── render ─────────────────────────────────────────────────── */
   return (
     <>
       <h2>Applications</h2>
