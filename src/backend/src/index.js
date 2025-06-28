@@ -45,6 +45,9 @@ app.use(
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static('public'));
 
+/* quick 204 for favicon requests so browsers stop complaining */
+app.get('/favicon.ico', (_req,res)=>res.status(204).end());
+
 /* clone once at start so first request is fast */
 ensureRepo()
   .then(dir => console.log('[BOOT] Git repo cloned →', dir))
@@ -59,121 +62,123 @@ app.get('/api/files', async (_req, res) => {
 });
 
 /* ════════════════════════════════════════════════════════════════
-   2.  Flatten appProjects → applications[]
-       (FIX: include `file` and wrap each Application in `app`)
+   2.  Flatten appProjects → applications[] (include `file` path)
    ═══════════════════════════════════════════════════════════════ */
 app.get('/api/apps', async (req, res) => {
-  const targets = req.query.file
-    ? [req.query.file]            // single file supplied by UI
-    : await listAppFiles();       // otherwise use them all
-
+  const targets = req.query.file ? [req.query.file] : await listAppFiles();
   const apps = [];
   for (const f of targets) {
     const raw = await fs.readFile(f, 'utf8');
     const doc = yaml.load(raw) ?? {};
     (doc.appProjects || []).forEach(p =>
-      (p.applications || []).forEach(a =>
-        apps.push({ project: p.name, file: f, app: a })   // ← crucial fix
-      )
+      (p.applications || []).forEach(a => apps.push({ project: p.name, file: f, app: a }))
     );
   }
   res.json(apps);
 });
 
 /* ════════════════════════════════════════════════════════════════
-   3.  Current chart values
+   3.  Simplified values fetch (legacy)                           
    ═══════════════════════════════════════════════════════════════ */
 app.get('/api/values', async (req, res) => {
   const { chartPath, valueFile } = req.query;
-  if (!chartPath) {
-    return res.status(400).json({ error: 'chartPath query param required' });
-  }
+  if (!chartPath) return res.status(400).json({ error: 'chartPath query param required' });
 
-  const absChartDir = path.join(
-    ensureRoot(chartPath),
-    CHARTS_ROOT,
-    chartPath
-  );
-
-  const overrideFile =
-    valueFile ||
-    path.join(
-      ensureRoot(chartPath),
-      VALUES_SUBDIR,
-      `${path.basename(chartPath)}.yaml`
-    );
-
+  const overrideFile = valueFile || path.join(ensureRoot(chartPath), VALUES_SUBDIR, `${path.basename(chartPath)}.yaml`);
   try {
     const raw = await fs.readFile(overrideFile, 'utf8');
-    const vals = yaml.load(raw) ?? {};
-    res.json({ values: vals, from: overrideFile });
-  } catch (e) {
+    res.json({ values: yaml.load(raw) ?? {}, from: overrideFile });
+  } catch {
     res.status(404).json({ error: 'values file not found', path: overrideFile });
   }
 });
 
 /* ════════════════════════════════════════════════════════════════
-   4.  Chart versions (Artifact Hub)
-       (uses new /packages/helm/{repo}/{chart} endpoint)
+   3b.  Detailed values endpoint used by the React UI              
+   ═══════════════════════════════════════════════════════════════ */
+app.get('/api/app/values', async (req, res) => {
+  const { name, chart, version = '', repoURL = '', path: chartPath = '', file = '' } = req.query;
+  if (!name || !chart) return res.status(400).json({ error: 'name and chart are required' });
+
+  /* 1️⃣  override YAML (may be absent) */
+  let overrideValues = '';
+  if (file) {
+    try {
+      const valuesFile = path.join(path.dirname(file), VALUES_SUBDIR, `${name}.yaml`);
+      overrideValues = await fs.readFile(valuesFile, 'utf8');
+    } catch {/* ignore */}
+  }
+
+  /* 2️⃣  default values from Artifact Hub  */
+  let defaultValues = '';
+  const encodedRepo = encodeURIComponent(repoURL);
+  const encodedChart = encodeURIComponent(chart);
+  if (version) {
+    try {
+      const vURL = `${ARTHUB_BASE}/packages/helm/${encodedRepo}/${encodedChart}/${version}/values`;
+      defaultValues = await axios.get(vURL, { timeout: 10000 }).then(r => r.data);
+    } catch {/* ignore */}
+    if (!defaultValues) {
+      try {
+        const tURL = `${ARTHUB_BASE}/packages/helm/${encodedRepo}/${encodedChart}/${version}/templates`;
+        const tpl = await axios.get(tURL, { timeout: 10000 }).then(r => r.data);
+        defaultValues = yaml.dump(tpl.values || {}, { lineWidth: 0 });
+      } catch {/* ignore */}
+    }
+  }
+
+  /* 3️⃣  metadata (description, home, maintainers) */
+  let meta = {};
+  try {
+    const pURL = `${ARTHUB_BASE}/packages/helm/${encodedRepo}/${encodedChart}`;
+    const pkg = await axios.get(pURL, { timeout: 10000 }).then(r => r.data);
+    meta = {
+      description : pkg.description,
+      home        : pkg.home_url,
+      maintainers : (pkg.maintainers || []).map(m => m.name),
+    };
+  } catch {/* ignore */}
+
+  res.json({ defaultValues, overrideValues, meta });
+});
+
+/* ════════════════════════════════════════════════════════════════
+   4.  Chart version list (proxy to AH)                            
    ═══════════════════════════════════════════════════════════════ */
 app.get('/api/versions', async (req, res) => {
   const { repo, chart, limit = 40 } = req.query;
-  if (!repo || !chart) {
-    return res
-      .status(400)
-      .json({ error: 'repo and chart query params are required' });
-  }
-
-  const url = `${ARTHUB_BASE}/packages/helm/${encodeURIComponent(
-    repo
-  )}/${encodeURIComponent(chart)}`;
+  if (!repo || !chart) return res.status(400).json({ error: 'repo and chart required' });
 
   try {
-    const { data } = await axios.get(url, { timeout: 10_000 });
-    const versions =
-      (data.available_versions || []).slice(0, +limit).map(v => v.version) || [];
+    const url = `${ARTHUB_BASE}/packages/helm/${encodeURIComponent(repo)}/${encodeURIComponent(chart)}`;
+    const { data } = await axios.get(url, { timeout: 10000 });
+    const versions = (data.available_versions || []).slice(0, +limit).map(v => v.version);
     res.json(versions);
   } catch (err) {
-    console.warn('[ArtHub] versions error:', err.message);
-    res.json([]);                 // keep the UI responsive even if AH fails
+    console.warn('[ArtifactHub] version lookup failed:', err.message);
+    res.json([]);
   }
 });
 
 /* ════════════════════════════════════════════════════════════════
-   5.  Apply / delete webhooks
+   5.  Trigger sync / delete webhooks                              
    ═══════════════════════════════════════════════════════════════ */
 app.post('/api/sync', async (req, res) => {
   const { name, namespace } = req.body;
-  try {
-    await triggerWebhook(name, namespace);
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  try { await triggerWebhook(name, namespace); res.json({ ok: true }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
 });
-
 app.post('/api/delete', async (req, res) => {
   const { name, namespace } = req.body;
-  try {
-    await triggerDeleteWebhook(name, namespace);
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  try { await triggerDeleteWebhook(name, namespace); res.json({ ok: true }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 /* ═══════════════════════════════════════════════════════════════ */
+app.listen(cfg.port, () => console.log(`✔︎ backend listening on ${cfg.port}`));
 
-app.listen(cfg.port, () =>
-  console.log(`✔︎ backend listening on ${cfg.port}`)
-);
-
-/* ────────── helpers ───────────────────────────────────────────── */
-
+/* ───────── helpers ────────────────────────────────────────────── */
 function ensureRoot(p) {
-  //  Grab the first folder (external/, internal/, …) so that both styles work
   const segs = p.split(path.sep);
-  return segs.length && ['external', 'internal'].includes(segs[0])
-    ? segs[0]
-    : '.';
+  return segs.length && ['external', 'internal'].includes(segs[0]) ? segs[0] : '.';
 }
