@@ -2,28 +2,14 @@ import React, { useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
 import Spinner from "./Spinner.jsx";
 
-/* --------------------------------------------------------------------------
-   Helper that derives the correct Artifact Hub “owner” (repository slug):
-   1) Prefer the repoName we stored in ChartSearch.jsx.
-   2) Otherwise fall back to guessing it from the repo URL.
----------------------------------------------------------------------------- */
+/* ── derive the Artifact Hub repo slug (“owner”) ─────────────────────────── */
 function getOwner(c) {
-  if (c.repoName) return c.repoName;                 // best case
+  if (c.repoName) return c.repoName;
 
   try {
     const u      = new URL(c.repo || "");
-    const parts  = u.pathname.replace(/\/+$/, "")    // trim trailing “/”
-                       .split("/")
-                       .filter(Boolean);
-
-    /* 👇  typical patterns
-       ├─ https://grafana.github.io/helm-charts      → helm-charts  (bad)
-       ├─ https://charts.bitnami.com/bitnami         → bitnami      (good)
-       └─ https://my.corp.local/helm/foo             → foo          (good)
-    */
+    const parts  = u.pathname.replace(/\/+$/, "").split("/").filter(Boolean);
     if (parts.length) return parts.pop();
-
-    /* finally, use the host minus dots: grafana.github.io → grafana */
     return u.hostname.split(".")[0] || "unknown";
   } catch {
     return "unknown";
@@ -33,27 +19,17 @@ function getOwner(c) {
 export default function ValuesEditor({ chart, onBack }) {
   const owner = getOwner(chart);
 
-  const [versions, setVers] = useState([]);
-  const [ver,      setVer ] = useState("");
-  const [ns,       setNs ]  = useState(chart.name);   // default = chart name
-  const [vals,     setVals] = useState("");
-  const [busy,     setBusy] = useState(true);
+  /* we already know the version → no extra /versions call */
+  const [versions] = useState([chart.version]);
+  const [ver, setVer] = useState(chart.version);
 
+  const [ns,   setNs ] = useState(chart.name);
+  const [vals, setVals] = useState("");
+  const [busy, setBusy] = useState(true);
   const ref = useRef(null);
 
-  /* ① fetch version list once ----------------------------------- */
+  /* ① fetch default values.yaml once -------------------------------------- */
   useEffect(() => {
-    fetch(`/api/chart/versions?owner=${owner}&chart=${chart.name}`)
-      .then(r => r.json())
-      .then(vs => {
-        setVers(vs);
-        setVer(vs[0] || "");
-      });
-  }, [chart, owner]);
-
-  /* ② load default values whenever version changes -------------- */
-  useEffect(() => {
-    if (!ver) return;
     setBusy(true);
     fetch(`/api/chart/values?owner=${owner}&chart=${chart.name}&ver=${ver}`)
       .then(r => r.text())
@@ -61,11 +37,11 @@ export default function ValuesEditor({ chart, onBack }) {
         setVals(txt);
         setBusy(false);
       });
-  }, [ver, chart, owner]);
+  }, [chart, owner, ver]);
 
-  /* ③ mount Monaco once ----------------------------------------- */
+  /* ② mount Monaco --------------------------------------------------------- */
   useEffect(() => {
-    if (!ref.current) return;
+    if (busy || !ref.current) return;
     const ed = monaco.editor.create(ref.current, {
       value: vals,
       language: "yaml",
@@ -75,9 +51,9 @@ export default function ValuesEditor({ chart, onBack }) {
     ed.onDidChangeModelContent(() => setVals(ed.getValue()));
     return () => ed.dispose();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [busy]); // re-mount when values first arrive
+  }, [busy]);
 
-  /* ④ submit ----------------------------------------------------- */
+  /* ③ submit --------------------------------------------------------------- */
   async function submit() {
     if (!window.confirm(`Deploy ${chart.name}@${ver} into "${ns}"?`)) return;
     setBusy(true);
@@ -98,30 +74,21 @@ export default function ValuesEditor({ chart, onBack }) {
     onBack();
   }
 
+  /* ── UI ─────────────────────────────────────────────────────────────────── */
   return (
     <>
-      <button className="btn-secondary btn-back" onClick={onBack}>
-        ← Back
-      </button>
+      <button className="btn-secondary btn-back" onClick={onBack}>← Back</button>
 
       <h2>{chart.name}</h2>
 
-      {/* version selector */}
       <label>Version</label>
-      {versions.length ? (
-        <select value={ver} onChange={e => setVer(e.target.value)}>
-          {versions.map(v => (
-            <option key={v}>{v}</option>
-          ))}
-        </select>
-      ) : (
-        <em>no versions found</em>
-      )}
+      <select value={ver} onChange={e => setVer(e.target.value)}>
+        {versions.map(v => <option key={v}>{v}</option>)}
+      </select>
 
       <label style={{ marginTop: "1rem" }}>Namespace</label>
       <input value={ns} onChange={e => setNs(e.target.value)} />
 
-      {/* values editor or spinner */}
       {busy ? (
         <div
           style={{
@@ -137,7 +104,7 @@ export default function ValuesEditor({ chart, onBack }) {
         <div ref={ref} className="editor-frame" />
       )}
 
-      <button className="btn" onClick={submit} disabled={busy || !ver}>
+      <button className="btn" onClick={submit} disabled={busy}>
         {busy ? "Loading…" : "Install"}
       </button>
     </>

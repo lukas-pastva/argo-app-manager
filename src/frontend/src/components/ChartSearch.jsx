@@ -8,32 +8,26 @@ export default function ChartSearch({ onSelect }) {
   async function search(text) {
     setQ(text);
     if (text.length < 4) { setRes([]); return; }
-    setLoad(true);
 
+    setLoad(true);
     const out = await fetch(`/api/search?q=${encodeURIComponent(text)}`)
                  .then(r => r.json());
 
-    /* keep first hit per name */
+    /* de-dupe by chart name and enrich with the repo slug */
     const seen = new Set();
     setRes(
       out
         .filter(p => !seen.has(p.name) && seen.add(p.name))
         .map(p => ({
-          /* ------------------------------------------------------------------
-             NEW: include repoName (the slug Artifact Hub expects in the
-             /packages/helm/<repo>/<chart> URLs).  Their search response
-             always gives it as repository.name
-           ------------------------------------------------------------------ */
           name        : p.name,
+          version     : p.version,              // <-- latest version (all we need)
           repo        : p.repo        || "",
           repoName    : p.repoName    || p.repository?.name || "",
-          version     : p.version,
           description : p.description,
           displayName : p.displayName || p.name,
           logo        : p.logo
         }))
     );
-
     setLoad(false);
   }
 
@@ -59,8 +53,7 @@ export default function ChartSearch({ onSelect }) {
             >
               {p.logo && <img src={p.logo} alt="" />}
               <div style={{ minWidth: 0 }}>
-                <strong>{p.displayName || p.name}</strong>
-                <br />
+                <strong>{p.displayName}</strong><br />
                 <small>
                   {p.repo?.replace(/^https?:\/\//, "") || "—"} · {p.version}
                 </small>
