@@ -1,68 +1,89 @@
 import React, { useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
-import Spinner from "./Spinner.jsx";
+import yaml         from "js-yaml";        //  <--  new
+import Spinner      from "./Spinner.jsx";
 
 const AH_BASE = "https://artifacthub.io/api/v1";
 
-/**
- * A very small hook-ish helper that fetches JSON and aborts if the component
- * unmounts before the request finishes – avoids annoying React warnings.
- */
-function useFetchJSON(url, deps, setData, setBusy) {
+/* ------------------------------------------------------------------ */
+/* generic fetch helper that auto-chooses .json() or .text()          */
+async function fetchSmart(url, { signal } = {}) {
+  const res = await fetch(url, { signal });
+  if (!res.ok)         throw new Error(`HTTP ${res.status}`);
+  const ct = res.headers.get("content-type") || "";
+  return ct.includes("json") ? res.json() : res.text();
+}
+
+/* small effect wrapper with abort-on-unmount                         */
+function useFetch(url, deps, cb) {
   useEffect(() => {
+    if (!url) return;                      // guard for first render
     const ctrl = new AbortController();
     (async () => {
-      setBusy(true);
-      try {
-        const data = await fetch(url, { signal: ctrl.signal }).then(r => r.json());
-        setData(data);
-      } finally {
-        setBusy(false);
-      }
+      try { cb(await fetchSmart(url, { signal: ctrl.signal })); }
+      catch { /* ignore (404 etc.) – caller decides what to do */ }
     })();
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 }
+/* ------------------------------------------------------------------ */
 
 export default function ValuesEditor({ chart, onBack }) {
-  /* props coming from ChartSearch ---------------------------------------- */
-  // chart.repoName   -> AH repository slug (e.g. "grafana")
-  // chart.name       -> chart name        (e.g. "loki-stack")
-  // chart.packageId  -> UUID
-
   const [versions, setVers] = useState([]);
   const [ver,      setVer ] = useState("");
   const [vals,     setVals] = useState("");
-  const [ns,       setNs ]  = useState(chart.name);   // sensible default
+  const [ns,       setNs ]  = useState(chart.name);
   const [busy,     setBusy] = useState(true);
-
   const editorRef  = useRef(null);
 
-  /* ① load version list once -------------------------------------------- */
-  useFetchJSON(
+  /* ① load version list ------------------------------------------------- */
+  useFetch(
     `${AH_BASE}/packages/helm/${chart.repoName}/${chart.name}`,
     [chart.repoName, chart.name],
     pkg => {
-      // AH returns newest first – keep that order, extract only the string
-      const v = pkg.available_versions.map(v => v.version);
+      const v = pkg.available_versions.map(v => v.version);  // newest first
       setVers(v);
       setVer(v[0] || "");
-    },
-    setBusy
+      setBusy(false);
+    }
   );
 
-  /* ② load default values every time the version changes ---------------- */
-  useFetchJSON(
-    ver
-      ? `${AH_BASE}/packages/${chart.packageId}/${ver}/values`
-      : null,
-    [chart.packageId, ver],
-    yml => setVals(typeof yml === "string" ? yml : ""),
-    setBusy
-  );
+  /* ② load default values every time the version changes --------------- */
+  useEffect(() => {
+    if (!ver) return;
+    let done = false;
+    (async () => {
+      setBusy(true);
 
-  /* ③ mount Monaco once values arrive ----------------------------------- */
+      /* first try the canonical /values endpoint ----------------------- */
+      try {
+        const yml = await fetchSmart(
+          `${AH_BASE}/packages/${chart.packageId}/${ver}/values`
+        );
+        if (!done) { setVals(yml); setBusy(false); }
+        return;
+      } catch (err) {
+        /* swallow only 404, otherwise bubble the error ---------------- */
+        if (!/404/.test(String(err))) { console.error(err); }
+      }
+
+      /* fallback to /templates and stringify the returned object ------ */
+      try {
+        const tpl = await fetchSmart(
+          `${AH_BASE}/packages/${chart.packageId}/${ver}/templates`
+        );
+        const yml = yaml.dump(tpl.values || {}, { lineWidth: 0 });
+        if (!done) { setVals(yml); setBusy(false); }
+      } catch (err) {
+        console.error("Unable to obtain chart values:", err);
+        if (!done) { setVals("# (no default values found)"); setBusy(false); }
+      }
+    })();
+    return () => { done = true; };
+  }, [chart.packageId, ver]);
+
+  /* ③ mount Monaco once we have something to show ---------------------- */
   useEffect(() => {
     if (busy || !editorRef.current) return;
     const ed = monaco.editor.create(editorRef.current, {
@@ -73,13 +94,11 @@ export default function ValuesEditor({ chart, onBack }) {
     });
     ed.onDidChangeModelContent(() => setVals(ed.getValue()));
     return () => ed.dispose();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [busy]);
+  }, [busy, vals]);
 
-  /* ④ deploy ------------------------------------------------------------ */
+  /* ④ deploy ----------------------------------------------------------- */
   async function submit() {
     if (!window.confirm(`Deploy ${chart.name}@${ver} into “${ns}”?`)) return;
-    /* Your existing backend call remains the same ----------------------- */
     setBusy(true);
     await fetch("/api/apps", {
       method : "POST",
@@ -98,7 +117,7 @@ export default function ValuesEditor({ chart, onBack }) {
     onBack();
   }
 
-  /* -------------------------------------------------------------------- */
+  /* ⑤ render ----------------------------------------------------------- */
   return (
     <>
       <button className="btn-secondary btn-back" onClick={onBack}>← Back</button>
@@ -109,9 +128,7 @@ export default function ValuesEditor({ chart, onBack }) {
         <select value={ver} onChange={e => setVer(e.target.value)}>
           {versions.map(v => <option key={v}>{v}</option>)}
         </select>
-      ) : (
-        <em>no versions found</em>
-      )}
+      ) : <em>no versions found</em>}
 
       <label style={{ marginTop: "1rem" }}>Namespace</label>
       <input value={ns} onChange={e => setNs(e.target.value)} />
