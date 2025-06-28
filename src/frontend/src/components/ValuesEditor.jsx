@@ -2,47 +2,70 @@ import React, { useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
 import Spinner from "./Spinner.jsx";
 
-/* ── derive the Artifact Hub repo slug (“owner”) ─────────────────────────── */
-function getOwner(c) {
-  if (c.repoName) return c.repoName;
+const AH_BASE = "https://artifacthub.io/api/v1";
 
-  try {
-    const u      = new URL(c.repo || "");
-    const parts  = u.pathname.replace(/\/+$/, "").split("/").filter(Boolean);
-    if (parts.length) return parts.pop();
-    return u.hostname.split(".")[0] || "unknown";
-  } catch {
-    return "unknown";
-  }
+/**
+ * A very small hook-ish helper that fetches JSON and aborts if the component
+ * unmounts before the request finishes – avoids annoying React warnings.
+ */
+function useFetchJSON(url, deps, setData, setBusy) {
+  useEffect(() => {
+    const ctrl = new AbortController();
+    (async () => {
+      setBusy(true);
+      try {
+        const data = await fetch(url, { signal: ctrl.signal }).then(r => r.json());
+        setData(data);
+      } finally {
+        setBusy(false);
+      }
+    })();
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
 }
 
 export default function ValuesEditor({ chart, onBack }) {
-  const owner = getOwner(chart);
+  /* props coming from ChartSearch ---------------------------------------- */
+  // chart.repoName   -> AH repository slug (e.g. "grafana")
+  // chart.name       -> chart name        (e.g. "loki-stack")
+  // chart.packageId  -> UUID
 
-  /* we already know the version → no extra /versions call */
-  const [versions] = useState([chart.version]);
-  const [ver, setVer] = useState(chart.version);
+  const [versions, setVers] = useState([]);
+  const [ver,      setVer ] = useState("");
+  const [vals,     setVals] = useState("");
+  const [ns,       setNs ]  = useState(chart.name);   // sensible default
+  const [busy,     setBusy] = useState(true);
 
-  const [ns,   setNs ] = useState(chart.name);
-  const [vals, setVals] = useState("");
-  const [busy, setBusy] = useState(true);
-  const ref = useRef(null);
+  const editorRef  = useRef(null);
 
-  /* ① fetch default values.yaml once -------------------------------------- */
+  /* ① load version list once -------------------------------------------- */
+  useFetchJSON(
+    `${AH_BASE}/packages/helm/${chart.repoName}/${chart.name}`,
+    [chart.repoName, chart.name],
+    pkg => {
+      // AH returns newest first – keep that order, extract only the string
+      const v = pkg.available_versions.map(v => v.version);
+      setVers(v);
+      setVer(v[0] || "");
+    },
+    setBusy
+  );
+
+  /* ② load default values every time the version changes ---------------- */
+  useFetchJSON(
+    ver
+      ? `${AH_BASE}/packages/${chart.packageId}/${ver}/values`
+      : null,
+    [chart.packageId, ver],
+    yml => setVals(typeof yml === "string" ? yml : ""),
+    setBusy
+  );
+
+  /* ③ mount Monaco once values arrive ----------------------------------- */
   useEffect(() => {
-    setBusy(true);
-    fetch(`/api/chart/values?owner=${owner}&chart=${chart.name}&ver=${ver}`)
-      .then(r => r.text())
-      .then(txt => {
-        setVals(txt);
-        setBusy(false);
-      });
-  }, [chart, owner, ver]);
-
-  /* ② mount Monaco --------------------------------------------------------- */
-  useEffect(() => {
-    if (busy || !ref.current) return;
-    const ed = monaco.editor.create(ref.current, {
+    if (busy || !editorRef.current) return;
+    const ed = monaco.editor.create(editorRef.current, {
       value: vals,
       language: "yaml",
       automaticLayout: true,
@@ -53,16 +76,17 @@ export default function ValuesEditor({ chart, onBack }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busy]);
 
-  /* ③ submit --------------------------------------------------------------- */
+  /* ④ deploy ------------------------------------------------------------ */
   async function submit() {
-    if (!window.confirm(`Deploy ${chart.name}@${ver} into "${ns}"?`)) return;
+    if (!window.confirm(`Deploy ${chart.name}@${ver} into “${ns}”?`)) return;
+    /* Your existing backend call remains the same ----------------------- */
     setBusy(true);
     await fetch("/api/apps", {
       method : "POST",
       headers: { "Content-Type": "application/json" },
       body   : JSON.stringify({
         chart   : chart.name,
-        repo    : chart.repo,
+        repo    : chart.repoURL,
         version : ver,
         release : chart.name,
         namespace: ns,
@@ -74,37 +98,31 @@ export default function ValuesEditor({ chart, onBack }) {
     onBack();
   }
 
-  /* ── UI ─────────────────────────────────────────────────────────────────── */
+  /* -------------------------------------------------------------------- */
   return (
     <>
       <button className="btn-secondary btn-back" onClick={onBack}>← Back</button>
-
-      <h2>{chart.name}</h2>
+      <h2>{chart.displayName || chart.name}</h2>
 
       <label>Version</label>
-      <select value={ver} onChange={e => setVer(e.target.value)}>
-        {versions.map(v => <option key={v}>{v}</option>)}
-      </select>
+      {versions.length ? (
+        <select value={ver} onChange={e => setVer(e.target.value)}>
+          {versions.map(v => <option key={v}>{v}</option>)}
+        </select>
+      ) : (
+        <em>no versions found</em>
+      )}
 
       <label style={{ marginTop: "1rem" }}>Namespace</label>
       <input value={ns} onChange={e => setNs(e.target.value)} />
 
       {busy ? (
-        <div
-          style={{
-            height: "52vh",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center"
-          }}
-        >
-          <Spinner size={36} />
-        </div>
+        <div className="editor-placeholder"><Spinner size={36} /></div>
       ) : (
-        <div ref={ref} className="editor-frame" />
+        <div ref={editorRef} className="editor-frame" />
       )}
 
-      <button className="btn" onClick={submit} disabled={busy}>
+      <button className="btn" onClick={submit} disabled={busy || !ver}>
         {busy ? "Loading…" : "Install"}
       </button>
     </>

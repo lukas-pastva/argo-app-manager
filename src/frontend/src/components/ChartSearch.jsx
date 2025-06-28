@@ -1,5 +1,31 @@
 import React, { useState } from "react";
 
+const AH_BASE = "https://artifacthub.io/api/v1";
+
+/**
+ * Tiny helper that turns the raw API answer into the subset of
+ * data we want to show in the type-ahead list.
+ */
+function normalize(hit) {
+  return {
+    /* package basics ------------------------------------------------------ */
+    packageId   : hit.package_id,
+    name        : hit.name,
+    displayName : hit.display_name || hit.name,
+    description : hit.description,
+    logo        : hit.logo_image_id
+      ? `https://artifacthub.io/image/${hit.logo_image_id}`
+      : null,
+
+    /* repository info ----------------------------------------------------- */
+    repoName    : hit.repository.name,
+    repoURL     : hit.repository.url,
+
+    /* convenience --------------------------------------------------------- */
+    latest      : hit.version,
+  };
+}
+
 export default function ChartSearch({ onSelect }) {
   const [q,   setQ]   = useState("");
   const [res, setRes] = useState([]);
@@ -7,27 +33,18 @@ export default function ChartSearch({ onSelect }) {
 
   async function search(text) {
     setQ(text);
-    if (text.length < 4) { setRes([]); return; }
-
+    if (text.length < 3) {        // AH doesn’t search for <3 chars
+      setRes([]);
+      return;
+    }
     setLoad(true);
-    const out = await fetch(`/api/search?q=${encodeURIComponent(text)}`)
-                 .then(r => r.json());
 
-    /* de-dupe by chart name and enrich with the repo slug */
-    const seen = new Set();
-    setRes(
-      out
-        .filter(p => !seen.has(p.name) && seen.add(p.name))
-        .map(p => ({
-          name        : p.name,
-          version     : p.version,              // <-- latest version (all we need)
-          repo        : p.repo        || "",
-          repoName    : p.repoName    || p.repository?.name || "",
-          description : p.description,
-          displayName : p.displayName || p.name,
-          logo        : p.logo
-        }))
-    );
+    const url =
+      `${AH_BASE}/packages/search?kind=0&limit=20&ts_query_web=` +
+      encodeURIComponent(text);
+
+    const { packages: hits = [] } = await fetch(url).then(r => r.json());
+    setRes(hits.map(normalize));
     setLoad(false);
   }
 
@@ -36,7 +53,7 @@ export default function ChartSearch({ onSelect }) {
       <div className="search-box">
         <input
           className="search-input"
-          placeholder="Type at least 4 characters…"
+          placeholder="Start typing a chart name…"
           value={q}
           onChange={e => search(e.target.value)}
         />
@@ -46,27 +63,17 @@ export default function ChartSearch({ onSelect }) {
       {res.length > 0 && (
         <div className="results-list">
           {res.map(p => (
-            <div
-              key={p.name}
-              className="result-item"
-              onClick={() => onSelect(p)}
-            >
+            <div key={p.packageId} className="result-item"
+                 onClick={() => onSelect(p)}>
               {p.logo && <img src={p.logo} alt="" />}
               <div style={{ minWidth: 0 }}>
-                <strong>{p.displayName}</strong><br />
+                <strong>{p.displayName}</strong>
+                <br />
                 <small>
-                  {p.repo?.replace(/^https?:\/\//, "") || "—"} · {p.version}
+                  {p.repoName} · {p.latest}
                 </small>
                 {p.description && (
-                  <small
-                    style={{
-                      color: "var(--text-light)",
-                      display: "block",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis"
-                    }}
-                  >
+                  <small className="truncate text-light">
                     {p.description}
                   </small>
                 )}
