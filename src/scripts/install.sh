@@ -20,7 +20,7 @@ var_name="{{inputs.parameters.var_name}}"
 var_chart="{{inputs.parameters.var_chart}}"
 var_version="{{inputs.parameters.var_version}}"
 var_namespace="{{inputs.parameters.var_namespace}}"
-var_userValuesYaml="{{inputs.parameters.var_userValuesYaml}}"   # base-64
+var_userValuesYaml="{{inputs.parameters.var_userValuesYaml}}"   # already *plain* YAML
 
 # ── guard: were they rendered? ────────────────────────────────────────────────
 for v in var_name var_chart var_version var_namespace var_userValuesYaml; do
@@ -28,8 +28,8 @@ for v in var_name var_chart var_version var_namespace var_userValuesYaml; do
     echo "❌  Parameter '$v' not supplied (still '${!v}')" >&2; exit 1; }
 done
 
-release="${var_name:-$var_chart}"               # default release name
-values="$(echo "$var_userValuesYaml" | base64 --decode)"
+release="${var_name:-$var_chart}"          # default release name
+values="${var_userValuesYaml}"             # ← plain YAML, no base64 decode
 
 echo "🚀  Request: $release → $var_namespace  •  $var_chart@$var_version"
 
@@ -101,7 +101,7 @@ spec:
         - ../../${VALUES_SUBDIR}/${release}.yml
 EOF
 
-# ⤵ insert / update block
+# insert / update block
 if yq 'select(.kind=="Application") | .metadata.name' "$apps_file" \
      | grep -qx "$release"; then
   echo "🔄  Updating Application in $apps_file"
