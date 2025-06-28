@@ -17,23 +17,23 @@ PUSH_BRANCH="${PUSH_BRANCH:-main}"           # main | <branch> | new
 COMMIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-helm-toggler}"
 COMMIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-helm-toggler@local}"
 
-# ════════════════ READ PAYLOAD ════════════════════════════════════════════════
+# ════════════════ READ PAYLOAD (all keys start with var_) ═════════════════════
 json="$(cat)"
 j() { echo "$json" | jq -r "$1 // empty"; }
 
-name=$(j .name)                     # Application / release name
-chart=$(j .chart)                   # chart (no owner prefix)
-version=$(j .version)
-namespace=$(j .namespace)
-values_b64=$(j .userValuesYaml)     # base-64 encoded overrides
+var_name=$(j .var_name)                          # Application / release name
+var_chart=$(j .var_chart)                        # chart (no owner prefix)
+var_version=$(j .var_version)
+var_namespace=$(j .var_namespace)
+var_userValuesYaml=$(j .var_userValuesYaml)      # base-64 encoded overrides
 
-[[ -z $chart || -z $version || -z $namespace || -z $values_b64 ]] && {
-  echo "❌  Missing required fields in webhook" >&2; exit 1; }
+[[ -z $var_chart || -z $var_version || -z $var_namespace || -z $var_userValuesYaml ]] && {
+  echo "❌  Missing required var_* fields in webhook" >&2; exit 1; }
 
-release="${name:-$chart}"           # fallback if ‘name’ is omitted
-values="$(echo "$values_b64" | base64 --decode)"
+release="${var_name:-$var_chart}"                # fallback if var_name omitted
+values="$(echo "$var_userValuesYaml" | base64 --decode)"
 
-echo "🚀  Request: $release → $namespace  •  $chart@$version"
+echo "🚀  Request: $release → $var_namespace  •  $var_chart@$var_version"
 
 # ════════════════ 1) locate / create app-of-apps file ════════════════════════
 apps_file=$(find "$APPS_DIR" -type f -name "$APP_FILE_PATTERN" | head -n1)
@@ -66,10 +66,10 @@ spec:
   project: default
   destination:
     server: https://kubernetes.default.svc
-    namespace: ${namespace}
+    namespace: ${var_namespace}
   source:
     repoURL: ${git_url}
-    path: ${CHARTS_ROOT}/${chart}/${version}
+    path: ${CHARTS_ROOT}/${var_chart}/${var_version}
     targetRevision: ${PUSH_BRANCH}
     helm:
       valueFiles:
@@ -92,7 +92,7 @@ fi
 # ════════════════ 5) git add / commit / push ═════════════════════════════════
 git add "$apps_file" "$values_file"
 
-chart_dir="${CHARTS_ROOT}/${chart}/${version}"
+chart_dir="${CHARTS_ROOT}/${var_chart}/${var_version}"
 if [[ -d $chart_dir ]]; then
   git add "$chart_dir"
   echo "📦  Added existing chart dir $chart_dir"
@@ -119,7 +119,7 @@ else
   echo "🌿  Using branch $branch_to_push"
 fi
 
-git commit -m "feat: add/update ${release} (${namespace}) chart ${chart} ${version}"
+git commit -m "feat: add/update ${release} (${var_namespace}) chart ${var_chart} ${var_version}"
 echo "📤  Pushing to origin/$branch_to_push"
 git push -u origin "$branch_to_push"
 
