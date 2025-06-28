@@ -5,14 +5,13 @@ import yaml          from "js-yaml";
 import fs            from "fs/promises";
 import path          from "node:path";
 import { spawnSync } from "node:child_process";
-import os            from "node:os";
 
-import cfg                     from "./config.js";
-import { listAppFiles,
-         ensureRepo }          from "./git.js";
-import { deltaYaml }           from "./diff.js";
+import cfg                       from "./config.js";
+import { ensureRepo,
+         listAppFiles }          from "./git.js";
+import { deltaYaml }             from "./diff.js";
 import { triggerWebhook,
-         triggerDeleteWebhook } from "./argo.js";
+         triggerDeleteWebhook }   from "./argo.js";
 
 const CHARTS_ROOT   = process.env.CHARTS_ROOT   || "charts/external";
 const VALUES_SUBDIR = process.env.VALUES_SUBDIR || "values";
@@ -21,6 +20,12 @@ const app = express();
 app.use(helmet());
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static("public"));
+
+/* ── pre-clone on boot ─────────────────────────────────────────── */
+ensureRepo()
+  .then(dir => console.log("[DEBUG] Git repo cloned to", dir))
+  .catch(e  => console.error("❌  Git clone failed:", e));
+
 
 /* ── 1. files list ──────────────────────────────────────────────── */
 app.get("/api/files", async (_req, res) => {

@@ -1,74 +1,76 @@
 import React, { useEffect, useState } from "react";
-import AppDetails from "./AppDetails.jsx";
+import AppDetails  from "./AppDetails.jsx";
+import Spinner     from "./Spinner.jsx";
 
-const FETCH_ICONS = false;              // ← keep false to avoid 429s
+const FETCH_ICONS = false;                // ← keep false to avoid ArtifactHub 429s
 
 export default function AppsList({ file }) {
-  const [flat,  setFlat]  = useState([]);      // flat backend list
-  const [icons, setIcons] = useState({});      // key → logoURL | false
-  const [sel,   setSel]   = useState(null);    // currently opened details
+  const [flat,  setFlat]  = useState([]);
+  const [icons, setIcons] = useState({});
+  const [sel,   setSel]   = useState(null);
+  const [busy,  setBusy]  = useState(true);
 
-  /* --- load apps for active file -------------------------------- */
+  /* load list ---------------------------------------------------- */
   useEffect(() => {
     if (!file) return;
+    setBusy(true);
     fetch(`/api/apps?file=${encodeURIComponent(file)}`)
-      .then((r) => r.json())
-      .then(setFlat);
+      .then(r => r.json())
+      .then(list => { setFlat(list); setBusy(false); });
   }, [file]);
 
-  /* --- optional logo look-ups ----------------------------------- */
+  /* optional logo look-ups -------------------------------------- */
   useEffect(() => {
     if (!FETCH_ICONS) return;
     flat.forEach(({ app }) => {
-      const { repoURL = "", chart = "" } = app;
-      if (chart.length < 4) return;
-      const key = `${repoURL}/${chart}`;
-      if (icons[key] !== undefined) return;
+      const key = `${app.repoURL}/${app.chart}`;
+      if (icons[key] !== undefined || (app.chart || "").length < 4) return;
 
-      fetch(`/api/search?q=${encodeURIComponent(chart)}`)
-        .then((r) => r.json())
-        .then((arr) => {
-          const hit = arr.find((p) => p.name === chart);
-          setIcons((m) => ({ ...m, [key]: hit?.logo || false }));
+      fetch(`/api/search?q=${encodeURIComponent(app.chart)}`)
+        .then(r => r.json())
+        .then(arr => {
+          const hit = arr.find(p => p.name === app.chart);
+          setIcons(m => ({ ...m, [key]: hit?.logo || false }));
         })
-        .catch(() => setIcons((m) => ({ ...m, [key]: false })));
+        .catch(() => setIcons(m => ({ ...m, [key]: false })));
     });
   }, [flat, icons]);
 
-  /* --- group by project ----------------------------------------- */
+  /* group by appProject ----------------------------------------- */
   const grouped = flat.reduce((m, it) => {
     (m[it.project] ??= []).push(it);
     return m;
   }, {});
 
-  /* --- render ---------------------------------------------------- */
+  /* render ------------------------------------------------------- */
+  if (busy) return <div style={{ padding:"2rem" }}><Spinner size={32} /></div>;
+
   return (
     <>
-      <h2>Applications</h2>
-
       {Object.entries(grouped).map(([project, apps]) => (
-        <div key={project} style={{ marginBottom: "1.5rem" }}>
-          <h3 style={{ margin: "0.6rem 0" }}>{project}</h3>
+        <section key={project} className="project-group">
+          <h3>{project}</h3>
 
           <div className="apps-list">
             {apps.map(({ app, file }) => {
-              const key   = `${app.repoURL}/${app.chart}`;
-              const logo  = icons[key];
-              const click = () => setSel({ project, file, app });
+              const iKey = `${app.repoURL}/${app.chart}`;
+              const logo = icons[iKey];
+              const open = () => setSel({ project, file, app });
 
               return (
-                <div className="app-card" key={project + "/" + app.name} onClick={click}>
+                <div className="app-card" key={project + "/" + app.name} onClick={open}>
                   {logo ? <img src={logo} alt="" /> : <span>📦</span>}
-                  <div>
-                    <span className="name">{app.name}</span>
-                    <br />
+                  <div style={{ minWidth:0 }}>
+                    <span className="name" style={{ whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                      {app.name}
+                    </span><br/>
                     <small>{app.chart}:{app.targetRevision}</small>
                   </div>
                 </div>
               );
             })}
           </div>
-        </div>
+        </section>
       ))}
 
       {sel && <AppDetails {...sel} onClose={() => setSel(null)} />}

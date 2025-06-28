@@ -201,3 +201,46 @@ input[type='text']{
   color: var(--primary);
   user-select: none;
 }
+
+/* widen overall card */
+.app-wrapper {
+  max-width: 1280px;          /* was 920px */
+  margin   : 2.5rem auto;
+  padding  : 2rem 3rem;
+  /* other props unchanged */
+}
+
+/* project group wrapper  */
+.project-group {
+  border       : 1px solid var(--border);
+  border-radius: 10px;
+  padding      : 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+  background   : var(--card-bg);
+  transition   : background .25s;
+}
+
+/* group heading */
+.project-group h3 {
+  margin   : 0 0 .8rem;
+  font-size: 1.1rem;
+  color    : var(--primary);
+}
+
+/* apps grid slightly wider */
+.apps-list {
+  display              : grid;
+  grid-template-columns: repeat(auto-fill,minmax(260px,1fr));  /* was 190px */
+  gap                  : .8rem;
+}
+
+/* simple spinner */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  width:24px; height:24px;
+  border:3px solid var(--border);
+  border-top-color:var(--primary);
+  border-radius:50%;
+  animation:spin 1s linear infinite;
+  margin:auto;
+}
