@@ -14,9 +14,10 @@ import cfg                          from "./config.js";
 import { ensureRepo, listAppFiles } from "./git.js";
 import { deltaYaml }                from "./diff.js";
 import {
-  triggerWebhook,          // fresh install  (helm install)
-  triggerDeleteWebhook,    // remove release (helm uninstall)
-  triggerUpgradeWebhook    // edit/upgrade   (helm upgrade)
+  triggerWebhook,          // helm install
+  triggerDeleteWebhook,    // helm uninstall
+  triggerUpgradeWebhook,   // helm upgrade
+  triggerDownloadWebhook   // helm pull-only
 }                           from "./argo.js";
 
 /* ───────── constants ─────────────────────────────────────────── */
@@ -226,6 +227,20 @@ app.post("/api/upgrade", async (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     console.error("[upgrade] webhook error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* 6-e  download chart (pull only – no Application created) */
+app.post("/api/download", async (req, res) => {
+  console.log("[download] Download request body:",
+              JSON.stringify(req.body, null, 2));
+
+  try {
+    await triggerDownloadWebhook(req.body);   // helm pull
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("[download] webhook error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

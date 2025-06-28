@@ -14,6 +14,7 @@ function post(url, body) {
   return axios.post(url, body, { headers });
 }
 
-export const triggerWebhook        = (body) => post(cfg.webhookUrl,        body);
-export const triggerDeleteWebhook  = (body) => post(cfg.deleteWebhookUrl,  body);
-export const triggerUpgradeWebhook = (body) => post(cfg.upgradeWebhookUrl, body);
+export const triggerWebhook         = (b) => post(cfg.webhookUrl,         b);  // install
+export const triggerDeleteWebhook   = (b) => post(cfg.deleteWebhookUrl,   b);  // delete
+export const triggerUpgradeWebhook  = (b) => post(cfg.upgradeWebhookUrl,  b);  // upgrade
+export const triggerDownloadWebhook = (b) => post(cfg.downloadWebhookUrl, b);  // ⬅ NEW
