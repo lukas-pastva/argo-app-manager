@@ -60,6 +60,7 @@ app.get('/api/files', async (_req, res) => {
 
 /* ════════════════════════════════════════════════════════════════
    2.  Flatten appProjects → applications[]
+       (FIX: include `file` and wrap each Application in `app`)
    ═══════════════════════════════════════════════════════════════ */
 app.get('/api/apps', async (req, res) => {
   const targets = req.query.file
@@ -71,7 +72,9 @@ app.get('/api/apps', async (req, res) => {
     const raw = await fs.readFile(f, 'utf8');
     const doc = yaml.load(raw) ?? {};
     (doc.appProjects || []).forEach(p =>
-      (p.applications || []).forEach(a => apps.push({ project: p.name, ...a }))
+      (p.applications || []).forEach(a =>
+        apps.push({ project: p.name, file: f, app: a })   // ← crucial fix
+      )
     );
   }
   res.json(apps);
@@ -111,8 +114,7 @@ app.get('/api/values', async (req, res) => {
 
 /* ════════════════════════════════════════════════════════════════
    4.  Chart versions (Artifact Hub)
-       NOTE: the old /versions?limit=N endpoint is gone.
-       We now fetch the package once and read .available_versions.
+       (uses new /packages/helm/{repo}/{chart} endpoint)
    ═══════════════════════════════════════════════════════════════ */
 app.get('/api/versions', async (req, res) => {
   const { repo, chart, limit = 40 } = req.query;
@@ -133,12 +135,12 @@ app.get('/api/versions', async (req, res) => {
     res.json(versions);
   } catch (err) {
     console.warn('[ArtHub] versions error:', err.message);
-    res.json([]); // keep the UI responsive even if Artifact Hub fails
+    res.json([]);                 // keep the UI responsive even if AH fails
   }
 });
 
 /* ════════════════════════════════════════════════════════════════
-   5.  Apply / delete webhooks (Argo CD)
+   5.  Apply / delete webhooks
    ═══════════════════════════════════════════════════════════════ */
 app.post('/api/sync', async (req, res) => {
   const { name, namespace } = req.body;
