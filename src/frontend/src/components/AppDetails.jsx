@@ -28,16 +28,16 @@ export default function AppDetails({ project, file, app, onClose }) {
     overrideValues: "",
     meta: {},
   });
-  const [loading, setLoading]     = useState(true);
-  const [editing, setEditing]     = useState(false);
-  const [preview, setPreview]     = useState(null);        // { delta } | null
-  const [busy, setBusy]           = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [preview, setPreview] = useState(null); // { delta } | null
+  const [busy, setBusy] = useState(false);
 
   /* refs -------------------------------------------------------- */
-  const defDivRef  = useRef(null);           // left-side viewer
-  const ovrDivRef  = useRef(null);           // right-side view / editor
-  const ovrEdRef   = useRef(null);           // Monaco instance (override)
-  const yamlRef    = useRef("");             // live override YAML text
+  const defDivRef = useRef(null); // left-side viewer
+  const ovrDivRef = useRef(null); // right-side view / editor
+  const ovrEdRef = useRef(null); // Monaco instance (override)
+  const yamlRef = useRef(""); // live override YAML text
 
   /* lock body scroll while modal open -------------------------- */
   useEffect(() => {
@@ -50,21 +50,21 @@ export default function AppDetails({ project, file, app, onClose }) {
     const { chart, version } = chartInfo(app);
     const qs = new URLSearchParams({
       project,
-      name   : app.name,
+      name: app.name,
       chart,
       version,
       repoURL: app.repoURL,
-      path   : app.path,
+      path: app.path,
       file,
     });
 
     fetch(`/api/app/values?${qs.toString()}`)
-      .then(r => r.json())
-      .then(j => {
+      .then((r) => r.json())
+      .then((j) => {
         setVals({
-          defaultValues : j.defaultValues  || "",
+          defaultValues: j.defaultValues || "",
           overrideValues: j.overrideValues || "",
-          meta          : j.meta           || {},
+          meta: j.meta || {},
         });
         yamlRef.current = j.overrideValues || "";
         setLoading(false);
@@ -114,13 +114,13 @@ export default function AppDetails({ project, file, app, onClose }) {
     setBusy(true);
     try {
       const delta = await fetch("/api/delta", {
-        method : "POST",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body   : JSON.stringify({
+        body: JSON.stringify({
           defaultYaml: vals.defaultValues,
-          userYaml   : yamlRef.current,
+          userYaml: yamlRef.current,
         }),
-      }).then(r => r.text());
+      }).then((r) => r.text());
       setPreview({ delta });
     } catch (e) {
       console.error("Δ-preview error:", e);
@@ -134,24 +134,21 @@ export default function AppDetails({ project, file, app, onClose }) {
   async function saveUpgrade() {
     setBusy(true);
     const { chart, version } = chartInfo(app);
-    const ns =
-      app.destinationNamespace ||
-      app.namespace ||
-      "default";
+    const ns = app.destinationNamespace || app.namespace || "default";
 
     try {
       await fetch("/api/upgrade", {
-        method : "POST",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body   : JSON.stringify({
+        body: JSON.stringify({
           chart,
-          repo     : app.repoURL,
+          repo: app.repoURL,
           version,
-          release  : app.name,
+          release: app.name,
           namespace: ns,
           userValuesYaml: yamlRef.current,
         }),
-      }).then(r => {
+      }).then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
       });
 
@@ -173,7 +170,7 @@ export default function AppDetails({ project, file, app, onClose }) {
     useEffect(() => {
       if (!mRef.current) return;
       const e = monaco.editor.create(mRef.current, {
-        value   : preview.delta || "# (no changes)",
+        value: preview.delta || "# (no changes)",
         language: "yaml",
         readOnly: true,
         automaticLayout: true,
@@ -187,7 +184,7 @@ export default function AppDetails({ project, file, app, onClose }) {
         <div
           className="modal-dialog"
           style={{ width: "64vw", maxWidth: 900 }}
-          onClick={e => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
         >
           <button
             className="modal-close"
@@ -292,7 +289,7 @@ export default function AppDetails({ project, file, app, onClose }) {
       <div
         className="modal-dialog"
         style={{ width: "90vw", maxWidth: 1280 }}
-        onClick={e => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
       >
         <button className="modal-close" onClick={close} aria-label="close">
           ×
@@ -367,47 +364,19 @@ export default function AppDetails({ project, file, app, onClose }) {
                   </p>
                 )}
 
-                <div
-                  ref={ovrDivRef}
-                  style={{
-                    height: "48vh",
-                    border: "1px solid var(--border)",
-                    borderRadius: 6,
-                  }}
-                />
-
-                {/* action buttons */}
-                <div
-                  style={{
-                    display: "flex",
-                    gap: ".6rem",
-                    marginTop: ".8rem",
-                  }}
-                >
-                  {editing ? (
-                    <>
-                      <button
-                        className="btn-secondary"
-                        onClick={() => {
-                          // revert edits & exit edit mode
-                          setEditing(false);
-                          yamlRef.current = vals.overrideValues || "";
-                        }}
-                        disabled={busy}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        className="btn"
-                        onClick={openPreview}
-                        disabled={busy}
-                      >
-                        {busy ? "Working…" : "Preview & save"}
-                      </button>
-                    </>
-                  ) : (
+                {/* wrapper allows floating “Edit” button */}
+                <div style={{ position: "relative" }}>
+                  {/* floating Edit button – only when NOT editing */}
+                  {!editing && (
                     <button
-                      className="btn"
+                      className="btn-secondary"
+                      style={{
+                        position: "absolute",
+                        top: 6,
+                        right: 6,
+                        padding: ".25rem .6rem",
+                        fontSize: ".8rem",
+                      }}
                       onClick={() => {
                         if (
                           window.confirm(
@@ -418,10 +387,48 @@ export default function AppDetails({ project, file, app, onClose }) {
                         }
                       }}
                     >
-                      Edit values
+                      Edit
                     </button>
                   )}
+
+                  <div
+                    ref={ovrDivRef}
+                    style={{
+                      height: "48vh",
+                      border: "1px solid var(--border)",
+                      borderRadius: 6,
+                    }}
+                  />
                 </div>
+
+                {/* action buttons – only while editing */}
+                {editing && (
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: ".6rem",
+                      marginTop: ".8rem",
+                    }}
+                  >
+                    <button
+                      className="btn-secondary"
+                      onClick={() => {
+                        setEditing(false);
+                        yamlRef.current = vals.overrideValues || "";
+                      }}
+                      disabled={busy}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="btn"
+                      onClick={openPreview}
+                      disabled={busy}
+                    >
+                      {busy ? "Working…" : "Preview & save"}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </>
