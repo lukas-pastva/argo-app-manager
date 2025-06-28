@@ -36,8 +36,8 @@ export default function AppDetails({ project, file, app, onClose }) {
   /* refs -------------------------------------------------------- */
   const defDivRef = useRef(null); // left-side viewer
   const ovrDivRef = useRef(null); // right-side view / editor
-  const ovrEdRef = useRef(null); // Monaco instance (override)
-  const yamlRef = useRef(""); // live override YAML text
+  const ovrEdRef = useRef(null);  // Monaco instance (override)
+  const yamlRef  = useRef("");    // live override YAML text
 
   /* lock body scroll while modal open -------------------------- */
   useEffect(() => {
@@ -170,7 +170,7 @@ export default function AppDetails({ project, file, app, onClose }) {
     useEffect(() => {
       if (!mRef.current) return;
       const e = monaco.editor.create(mRef.current, {
-        value: preview.delta || "# (no changes)",
+        value: preview?.delta || "# (no changes)",
         language: "yaml",
         readOnly: true,
         automaticLayout: true,
@@ -365,18 +365,11 @@ export default function AppDetails({ project, file, app, onClose }) {
                 )}
 
                 {/* wrapper allows floating “Edit” button */}
-                <div style={{ position: "relative" }}>
+                <div className="ovr-wrapper">
                   {/* floating Edit button – only when NOT editing */}
                   {!editing && (
                     <button
-                      className="btn-secondary"
-                      style={{
-                        position: "absolute",
-                        top: 6,
-                        right: 6,
-                        padding: ".25rem .6rem",
-                        fontSize: ".8rem",
-                      }}
+                      className="btn-secondary edit-fab"
                       onClick={() => {
                         if (
                           window.confirm(
@@ -391,14 +384,7 @@ export default function AppDetails({ project, file, app, onClose }) {
                     </button>
                   )}
 
-                  <div
-                    ref={ovrDivRef}
-                    style={{
-                      height: "48vh",
-                      border: "1px solid var(--border)",
-                      borderRadius: 6,
-                    }}
-                  />
+                  <div ref={ovrDivRef} className="editor-frame" />
                 </div>
 
                 {/* action buttons – only while editing */}
