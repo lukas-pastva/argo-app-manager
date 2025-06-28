@@ -1,52 +1,71 @@
 #!/usr/bin/env bash
 #───────────────────────────────────────────────────────────────────────────────
-#  handle-helm-deploy.sh
-#  GitOps helper – create / update an Argo CD Application and commit the change.
+#  handle-helm-deploy.sh  (Argo-Workflow template-friendly)
+#
+#  • Writes Helm values under ./values/<release>.yml
+#  • Keeps / updates an “appProjects”–style app-of-apps YAML
+#  • Pulls the chart into   external/<chart>/<chart>/<version>/
+#  • Commits & pushes to the GitOps repo
+#
+#  Required tools:  git  jq  yq(v4)  helm
 #───────────────────────────────────────────────────────────────────────────────
 set -Eeuo pipefail
 [[ ${DEBUG:-false} == "true" ]] && set -x
 
-# ════════════════ REQUIRED ENV VARS ═══════════════════════════════════════════
-: "${GIT_SSH_KEY:?env var missing}"
-: "${GITOPS_REPO:?env var missing}"
-: "${GIT_EMAIL:?env var missing}"
-: "${GIT_USER:?env var missing}"
+# ─── tiny log helper ──────────────────────────────────────────────────────────
+log() { printf '\e[1;34m[%(%F %T)T]\e[0m %s\n' -1 "$*" >&2; }
+trap 'log "❌  Failed at line $LINENO – »${BASH_COMMAND}«"' ERR
 
-# ════════════════ WORKFLOW PARAMETERS (Argo renders these) ════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+#  0)  Inputs from the Argo-Workflow template
+#      (Argo substitutes the {{…}} placeholders at runtime)
+# ══════════════════════════════════════════════════════════════════════════════
 var_name="{{inputs.parameters.var_name}}"
 var_chart="{{inputs.parameters.var_chart}}"
 var_version="{{inputs.parameters.var_version}}"
 var_namespace="{{inputs.parameters.var_namespace}}"
 var_userValuesYaml="{{inputs.parameters.var_userValuesYaml}}"
 
-for v in var_name var_chart var_version var_namespace var_userValuesYaml; do
-  [[ "${!v}" =~ \{\{.*\}\} ]] && {
-    echo "❌  Parameter '$v' not supplied (still '${!v}')" >&2; exit 1; }
+for p in var_name var_chart var_version var_namespace var_userValuesYaml; do
+  [[ "${!p}" =~ \{\{.*\}\} ]] && { log "missing parameter $p"; exit 1; }
 done
 
 release="${var_name:-$var_chart}"
-values="${var_userValuesYaml}"
+values_yaml="${var_userValuesYaml}"
 
-echo "🚀  Request: $release → $var_namespace • $var_chart@$var_version"
+log "🚀  Request: ${release} → ${var_namespace} • ${var_chart}@${var_version}"
 
-# ════════════════ CONFIG (new defaults / overrides) ═══════════════════════════
-APPS_DIR="${APPS_DIR:-.}"                     # ← defaults to repo root
-APP_FILE_NAME="${APP_FILE_NAME:-app-of-apps.yaml}"   # NEW (env-overridable)
+# ══════════════════════════════════════════════════════════════════════════════
+#  1)  Required env-vars (fail fast if any is missing)
+# ══════════════════════════════════════════════════════════════════════════════
+: "${GIT_SSH_KEY:?need GIT_SSH_KEY}"
+: "${GITOPS_REPO:?need GITOPS_REPO}"
+: "${GIT_EMAIL:?need GIT_EMAIL}"
+: "${GIT_USER:?need GIT_USER}"
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  2)  Repo-local parameters (all overridable through env-vars)
+# ══════════════════════════════════════════════════════════════════════════════
+APPS_DIR="${APPS_DIR:-.}"                      # repo-relative folder (default root)
+APP_FILE_NAME="${APP_FILE_NAME:-app-of-apps.yaml}"
 VALUES_SUBDIR="${VALUES_SUBDIR:-values}"
-CHARTS_ROOT="charts/external"
-PUSH_BRANCH="${PUSH_BRANCH:-main}"
+CHARTS_ROOT="external"                         # where pulled charts end up
+PUSH_BRANCH="${PUSH_BRANCH:-main}"             # main | <fixed> | new
+HELM_REPO_URL="${HELM_REPO_URL:-git@gitlab.com:tronic-sk/helm-charts.git}"
 
-# ════════════════ TEMP CLONE WITH SSH KEY ════════════════════════════════════
-workdir="$(mktemp -d)"
-trap 'rm -rf "$workdir"' EXIT
+# ══════════════════════════════════════════════════════════════════════════════
+#  3)  Clone GitOps repo using the provided private key
+# ══════════════════════════════════════════════════════════════════════════════
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
 
-mkdir -p "$workdir/.ssh"
-printf '%s\n' "$GIT_SSH_KEY" > "$workdir/.ssh/id_rsa"
-chmod 600 "$workdir/.ssh/id_rsa"
-export GIT_SSH_COMMAND="ssh -i $workdir/.ssh/id_rsa -o StrictHostKeyChecking=no"
+mkdir -p "$tmp/.ssh"
+printf '%s\n' "$GIT_SSH_KEY" > "$tmp/.ssh/id_rsa"
+chmod 600 "$tmp/.ssh/id_rsa"
+export GIT_SSH_COMMAND="ssh -i $tmp/.ssh/id_rsa -o StrictHostKeyChecking=no"
 
-git -C "$workdir" clone --depth 1 "$GITOPS_REPO" repo
-cd "$workdir/repo"
+git -C "$tmp" clone --depth 1 "$GITOPS_REPO" repo
+cd "$tmp/repo"
 
 git config user.email "$GIT_EMAIL"
 git config user.name  "$GIT_USER"
@@ -58,55 +77,84 @@ else
   git checkout "$PUSH_BRANCH"
   branch="$PUSH_BRANCH"
 fi
+log "🔀  Working on branch $branch"
 
-# ════════════════ PATHS / FILES ══════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+#  4)  Paths & files
+# ══════════════════════════════════════════════════════════════════════════════
 apps_file="$APPS_DIR/$APP_FILE_NAME"
-[[ -f $apps_file ]] || { echo "🆕  Creating $apps_file"; mkdir -p "$(dirname "$apps_file")"; touch "$apps_file"; }
+[[ -f $apps_file ]] || { mkdir -p "$(dirname "$apps_file")"; echo "appProjects: []" > "$apps_file"; }
 
 values_dir="$(dirname "$apps_file")/$VALUES_SUBDIR"
 values_file="$values_dir/${release}.yml"
 mkdir -p "$values_dir"
-printf '%s' "$values" > "$values_file"
-echo "📝  Values → $values_file"
+printf '%s\n' "$values_yaml" > "$values_file"
+log "📝  Values → $values_file"
 
-# ════════════════ BUILD Application YAML ═════════════════════════════════════
-read -r -d '' app_yaml <<EOF
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: ${release}
-spec:
-  project: default
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: ${var_namespace}
-  source:
-    repoURL: $(echo "$GITOPS_REPO" | sed 's#^git@github.com:#https://github.com/#; s#\.git$##')
-    path: ${CHARTS_ROOT}/${var_chart}/${var_version}
-    targetRevision: ${branch}
-    helm:
-      valueFiles:
-        - ../../${VALUES_SUBDIR}/${release}.yml
-EOF
+# chart gets copied to:  external/<chart>/<chart>/<version>/
+chart_path="${CHARTS_ROOT}/${var_chart}/${var_chart}/${var_version}"
 
-# insert / update in app-of-apps file
-if yq 'select(.kind=="Application") | .metadata.name' "$apps_file" | grep -qx "$release"; then
-  echo "🔄  Updating ${release} entry"
-  yq -i '(.[] | select(.kind=="Application" and .metadata.name=="'"$release"'")) = load("'"$app_yaml"'")' "$apps_file"
+# ══════════════════════════════════════════════════════════════════════════════
+#  5)  Pull / cache Helm chart inside the repo (idempotent)
+# ══════════════════════════════════════════════════════════════════════════════
+if [[ -d $chart_path ]]; then
+  log "📦  Chart already present – skipping download"
 else
-  echo "➕  Adding ${release}"
-  printf '%s\n---\n' "$app_yaml" >> "$apps_file"
+  log "⬇️   Pulling chart to ${chart_path}"
+  tmpchart="$(mktemp -d)"
+  helm pull "${HELM_REPO_URL}/${var_chart}" --version "$var_version" -d "$tmpchart" >/dev/null
+  tar -xzf "$tmpchart/${var_chart}-${var_version}.tgz" -C "$tmpchart"
+  mkdir -p "$chart_path"
+  mv "$tmpchart/${var_chart}/"* "$chart_path/"
+  rm -rf "$tmpchart"
 fi
 
-# ════════════════ COMMIT & PUSH ══════════════════════════════════════════════
-git add "$apps_file" "$values_file"
+# ══════════════════════════════════════════════════════════════════════════════
+#  6)  Upsert the entry inside appProjects[…].applications[…]
+# ══════════════════════════════════════════════════════════════════════════════
+if ! command -v yq >/dev/null; then
+  log "❌  yq v4 is required for YAML edits"; exit 1
+fi
+
+yq -i '
+  .appProjects as $proj
+  | (index($proj[]?; .name == "'"$release"'")) as $idx
+  | if $idx == "" then
+      # ─── append new project ───────────────────────────────────────────────
+      .appProjects += [{
+        name: "'"$release"'",
+        applications: [{
+          name: "'"$release"'",
+          repoURL: "'"$HELM_REPO_URL"'",
+          path: "'"$chart_path"'",
+          autoSync: true,
+          valueFiles: true
+        }]
+      }]
+    else
+      # ─── update existing project/app ──────────────────────────────────────
+      .appProjects[$idx].applications[0] = {
+        name: "'"$release"'",
+        repoURL: "'"$HELM_REPO_URL"'",
+        path: "'"$chart_path"'",
+        autoSync: true,
+        valueFiles: true
+      }
+    end
+' "$apps_file"
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  7)  Commit & push
+# ══════════════════════════════════════════════════════════════════════════════
+git add "$apps_file" "$values_file" "$chart_path"
 
 if git diff --cached --quiet; then
-  echo "ℹ️  No changes – done."; exit 0
+  log "ℹ️  No changes – nothing to push."
+  exit 0
 fi
 
-git commit -m "feat(${release}): add/update ${var_chart} ${var_version}"
-echo "📤  Pushing to origin/$branch"
+git commit -m "feat(${release}): add / update ${var_chart} ${var_version}"
+log "📤  Pushing to origin/$branch"
 git push -u origin "$branch"
 
-echo "🎉  Completed for $release"
+log "✅  Completed for ${release}"
