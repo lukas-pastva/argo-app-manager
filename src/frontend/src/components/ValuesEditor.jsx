@@ -4,7 +4,7 @@
 
       ① pick version
       ② (optional) enter App name + Namespace
-      ③ tweak values.yaml  ← only if NOT download-only
+      ③ tweak values.yaml  ← can be maximised to full screen
       ④ Install ArgoCD Application  or  Download chart
 */
 
@@ -24,15 +24,13 @@ async function fetchSmart(url, opts = {}) {
   return ct.includes("json") ? res.json() : res.text();
 }
 
-/** effect-wrapper that aborts the fetch if the component unmounts */
+/** effect wrapper that aborts the fetch if the component unmounts */
 function useFetch(url, deps, cb) {
   useEffect(() => {
     if (!url) return;
     const ctrl = new AbortController();
     (async () => {
-      try {
-        cb(await fetchSmart(url, { signal: ctrl.signal }));
-      } catch {/* ignore */ }
+      try { cb(await fetchSmart(url, { signal: ctrl.signal })); } catch {}
     })();
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -48,18 +46,19 @@ export default function ValuesEditor({ chart, onBack }) {
   const [versions, setVers]   = useState([]);
   const [ver, setVer]         = useState("");
   const [initVals, setInit]   = useState("");
-  const [appName, setAppName] = useState(chart.name);   // NEW
+  const [appName, setAppName] = useState(chart.name);
   const [ns, setNs]           = useState(chart.name);
   const [busy, setBusy]       = useState(true);
   const [preview, setPre]     = useState(null);
   const [downloadOnly, setDL] = useState(false);
+  const [fullScreen, setFS]   = useState(false);          // NEW
 
   /* ─── refs ─────────────────────────────────────────────────── */
-  const edDivRef = useRef(null);
-  const edRef    = useRef(null);
-  const ymlRef   = useRef("");
+  const edDivRef = useRef(null);      // container for Monaco
+  const edRef    = useRef(null);      // Monaco instance
+  const ymlRef   = useRef("");        // live YAML text
 
-  /* ① versions list (Artifact Hub) */
+  /* ① fetch version list */
   useFetch(
     `/api/chart/versions?owner=${chart.repoName}&chart=${chart.name}`,
     [chart.repoName, chart.name],
@@ -69,7 +68,7 @@ export default function ValuesEditor({ chart, onBack }) {
     },
   );
 
-  /* ② chart default values */
+  /* ② fetch default values for selected version */
   useEffect(() => {
     if (!ver) return;
     let done = false;
@@ -93,21 +92,22 @@ export default function ValuesEditor({ chart, onBack }) {
         }
       }
     })();
-    return () => {
-      done = true;
-    };
+    return () => { done = true; };
   }, [chart.packageId, ver]);
 
-  /* ③ mount / dispose Monaco depending on download-only */
+  /* ③ create / recreate Monaco editor
+        – downloads disabled  OR  busy → no editor
+        – recreate when toggling fullScreen                       */
   useEffect(() => {
-    if (downloadOnly && edRef.current) {
-      edRef.current.dispose();
-      edRef.current = null;
-    }
-    if (busy || downloadOnly || !edDivRef.current || edRef.current) return;
+    if (busy || downloadOnly) return;
+
+    if (!edDivRef.current) return;
+
+    // dispose any previous instance
+    edRef.current?.dispose();
 
     edRef.current = monaco.editor.create(edDivRef.current, {
-      value: initVals,
+      value: ymlRef.current || initVals,
       language: "yaml",
       automaticLayout: true,
       minimap: { enabled: false },
@@ -117,8 +117,15 @@ export default function ValuesEditor({ chart, onBack }) {
     });
 
     return () => edRef.current?.dispose();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [busy, downloadOnly]);
+  }, [busy, downloadOnly, fullScreen, initVals]);
+
+  /* ④ escape key closes full-screen --------------------------- */
+  useEffect(() => {
+    if (!fullScreen) return;
+    const h = (e) => e.key === "Escape" && setFS(false);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [fullScreen]);
 
   /* ─── helpers ──────────────────────────────────────────────── */
   async function openPreview() {
@@ -145,26 +152,22 @@ export default function ValuesEditor({ chart, onBack }) {
   async function deploy() {
     setBusy(true);
 
-    const url  = downloadOnly ? "/api/download" : "/api/apps";
+    const url = downloadOnly ? "/api/download" : "/api/apps";
     let body;
 
     if (downloadOnly) {
-      body = {
-        chart: chart.name,
-        repo:  chart.repoURL,
-        version: ver,
-      };
+      body = { chart: chart.name, repo: chart.repoURL, version: ver };
     } else {
       const deltaStr   = (preview?.delta || "").trim() || "# (no overrides)";
-      const encodedStr = btoa(deltaStr);               // base-64 ⬅ NEW
+      const encodedStr = btoa(deltaStr);               // base-64
 
       body = {
         chart:   chart.name,
         repo:    chart.repoURL,
         version: ver,
-        release: appName,          // NEW → chosen Application name
+        release: appName,
         namespace: ns,
-        userValuesYaml: encodedStr // base-64 encoded
+        userValuesYaml: encodedStr,
       };
     }
 
@@ -181,7 +184,7 @@ export default function ValuesEditor({ chart, onBack }) {
     }
   }
 
-  /* ─── preview modal ────────────────────────────────────────── */
+  /* ─── preview modal ───────────────────────────────────────── */
   function PreviewModal() {
     const mRef = useRef(null);
     useEffect(() => {
@@ -243,7 +246,7 @@ export default function ValuesEditor({ chart, onBack }) {
               Back
             </button>
             <button className="btn" onClick={deploy}>
-              {busy ? "Working…" : "Install ArgoCD Application"}
+              {busy ? "Saving…" : "Install ArgoCD Application"}
             </button>
           </div>
         </div>
@@ -251,7 +254,7 @@ export default function ValuesEditor({ chart, onBack }) {
     );
   }
 
-  /* ─── header (logo + meta) ─────────────────────────────────── */
+  /* ─── header (logo + meta) ────────────────────────────────── */
   function ChartHeader() {
     return (
       <div
@@ -309,12 +312,41 @@ export default function ValuesEditor({ chart, onBack }) {
     );
   }
 
-  /* ─── render ───────────────────────────────────────────────── */
+  /* ─── render ──────────────────────────────────────────────── */
   const showEditor = !downloadOnly;
 
   return (
     <>
       {preview && !downloadOnly && <PreviewModal />}
+
+      {fullScreen && showEditor && (
+        <div
+          className="modal-overlay"
+          onClick={() => setFS(false)}
+        >
+          <div
+            className="modal-dialog"
+            style={{ width: "95vw", height: "90vh", padding: "1rem" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="modal-close"
+              onClick={() => setFS(false)}
+              aria-label="close"
+            >
+              ×
+            </button>
+            <div
+              ref={edDivRef}
+              style={{
+                height: "calc(100% - 16px)",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       <button className="btn-secondary btn-back" onClick={onBack}>
         ← Back
@@ -352,7 +384,7 @@ export default function ValuesEditor({ chart, onBack }) {
         Application yet)
       </label>
 
-      {/* extra inputs only for install path */}
+      {/* extra inputs + editor only for install path */}
       {showEditor && (
         <>
           <label style={{ marginTop: "1rem" }}>Application&nbsp;name</label>
@@ -382,7 +414,26 @@ export default function ValuesEditor({ chart, onBack }) {
               <Spinner size={36} />
             </div>
           ) : (
-            <div ref={edDivRef} className="editor-frame" />
+            /* wrapper enables absolute-positioned maximise button */
+            <div style={{ position: "relative" }}>
+              {!fullScreen && (
+                <button
+                  className="btn-secondary"
+                  style={{
+                    position: "absolute",
+                    top: 6,
+                    right: 6,
+                    padding: ".25rem .6rem",
+                    fontSize: ".8rem",
+                  }}
+                  onClick={() => setFS(true)}
+                  title="Maximise editor"
+                >
+                  ⤢
+                </button>
+              )}
+              <div ref={edDivRef} className="editor-frame" />
+            </div>
           )}
         </>
       )}
