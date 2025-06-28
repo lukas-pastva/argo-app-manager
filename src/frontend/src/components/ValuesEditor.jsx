@@ -124,7 +124,12 @@ export default function ValuesEditor({ chart, onBack }) {
     const endpoint = downloadOnly ? "/api/download" : "/api/apps";
 
     const payload = downloadOnly
-      ? { chart: chart.name, version: ver, repo: chart.repoURL }
+      ? { 
+        chart: chart.name, 
+        version: ver, 
+        repo: chart.repoURL,
+        release  : rel
+      }
       : {
           name     : rel,
           release  : rel,
