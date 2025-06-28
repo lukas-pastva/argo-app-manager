@@ -4,9 +4,9 @@
 
       ① pick version + namespace + release name
       ② (optionally) edit values.yaml
-      ③ preview the *override-only* YAML (Δ)
+      ③ preview the *override-only* YAML  (Δ)
       ④ install ArgoCD Application          – OR –
-         download chart only (cache-fill)   ← new
+         download chart only (cache-fill)
 */
 
 import React, { useEffect, useRef, useState } from "react";
@@ -48,20 +48,20 @@ function useFetch(url, deps, cb) {
 
 export default function ValuesEditor({ chart, onBack }) {
   /* ─── state ─────────────────────────────────────────────────── */
-  const [versions, setVers] = useState([]);
-  const [ver, setVer] = useState("");
-  const [initVals, setInit] = useState(""); // default YAML from chart
-  const [ns, setNs] = useState(chart.name);
-  const [rel, setRel] = useState(chart.name); // release / Application name
-  const [busy, setBusy] = useState(true);
-  const [preview, setPre] = useState(null); // { delta:string } | null
-  const [downloadOnly, setDLonly] = useState(false);
-  const [full, setFull] = useState(false); // full-screen YAML editor?
+  const [versions, setVers]   = useState([]);
+  const [ver, setVer]         = useState("");
+  const [initVals, setInit]   = useState("");     // default YAML from chart
+  const [ns, setNs]           = useState(chart.name);
+  const [rel, setRel]         = useState(chart.name);   // release / Application
+  const [busy, setBusy]       = useState(true);
+  const [preview, setPre]     = useState(null);   // { delta } | null
+  const [downloadOnly, setDL] = useState(false);
+  const [full, setFull]       = useState(false);  // full-screen YAML editor?
 
   /* ─── refs ──────────────────────────────────────────────────── */
-  const edDivRef = useRef(null); // embedded editor <div>
-  const edRef = useRef(null); // Monaco editor instance
-  const ymlRef = useRef(""); // live YAML text (no state churn)
+  const edDivRef = useRef(null);   // embedded editor host <div>
+  const edRef    = useRef(null);   // Monaco instance
+  const ymlRef   = useRef("");     // live YAML text
 
   /* ① fetch version list (CORS-free via backend proxy) */
   useFetch(
@@ -102,7 +102,7 @@ export default function ValuesEditor({ chart, onBack }) {
     };
   }, [chart.packageId, ver]);
 
-  /* ③ mount Monaco exactly once */
+  /* ③ mount Monaco once per session */
   useEffect(() => {
     if (busy || !edDivRef.current || edRef.current) return;
     edRef.current = monaco.editor.create(edDivRef.current, {
@@ -118,7 +118,7 @@ export default function ValuesEditor({ chart, onBack }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busy]);
 
-  /* ─── full-screen editor helpers ────────────────────────────── */
+  /* ─── full-screen editor overlay ────────────────────────────── */
   function FullscreenEditor() {
     const ref = useRef(null);
     useEffect(() => {
@@ -169,11 +169,11 @@ export default function ValuesEditor({ chart, onBack }) {
     );
   }
 
-  /* ─── preview helpers ───────────────────────────────────────── */
+  /* ─── Δ-preview helpers ─────────────────────────────────────── */
   async function openPreview() {
-    // download-only mode skips preview
     if (downloadOnly) {
-      return deploy("");
+      deploy("");            // no preview in download-only mode
+      return;
     }
     setBusy(true);
     try {
@@ -194,19 +194,20 @@ export default function ValuesEditor({ chart, onBack }) {
     }
   }
 
-  /* ─── install / download action ─────────────────────────────── */
+  /* ─── send install / download request ───────────────────────── */
   async function deploy(deltaOverride = null) {
     const deltaStr =
       deltaOverride !== null
         ? deltaOverride
         : (preview?.delta || "").trim() || "# (no overrides)";
+
     const payload = {
       chart: chart.name,
-      repo: chart.repoURL,
+      repo: chart.repoURL,      // Helm repo URL (for script to pull .tgz)
       version: ver,
       release: rel,
+      name: rel,                // <-- explicit Application name (NEW)
       namespace: ns,
-      name: rel,
       userValuesYaml:
         downloadOnly || deltaStr === "# (no overrides)"
           ? ""
@@ -238,6 +239,7 @@ export default function ValuesEditor({ chart, onBack }) {
       });
       return () => e.dispose();
     }, []);
+
     return (
       <div className="modal-overlay" onClick={() => setPre(null)}>
         <div
@@ -287,10 +289,10 @@ export default function ValuesEditor({ chart, onBack }) {
             </button>
             <button
               className="btn"
-              onClick={() => deploy(deltaStr => deltaStr)}
+              onClick={() => deploy(preview.delta)}
               disabled={busy}
             >
-              {busy ? "Saving…" : "Install"}
+              {busy ? "Working…" : "Install"}
             </button>
           </div>
         </div>
@@ -357,7 +359,6 @@ export default function ValuesEditor({ chart, onBack }) {
   /* ─── render ────────────────────────────────────────────────── */
   return (
     <>
-      {/* overlays */}
       {preview && <PreviewModal />}
       {full && <FullscreenEditor />}
 
@@ -379,7 +380,7 @@ export default function ValuesEditor({ chart, onBack }) {
         <em>no versions found</em>
       )}
 
-      {/* release / namespace */}
+      {/* release & namespace inputs */}
       <label style={{ marginTop: "1rem" }}>Application (release) name</label>
       <input
         value={rel}
@@ -399,13 +400,13 @@ export default function ValuesEditor({ chart, onBack }) {
         <input
           type="checkbox"
           checked={downloadOnly}
-          onChange={e => setDLonly(e.target.checked)}
+          onChange={e => setDL(e.target.checked)}
           style={{ transform: "translateY(2px)" }}
         />
         <span>I want only to download this Helm chart (do not install)</span>
       </label>
 
-      {/* editor or spinner – hidden when download-only */}
+      {/* editor – hidden in download-only mode */}
       {!downloadOnly && (
         <>
           {busy ? (
@@ -434,7 +435,7 @@ export default function ValuesEditor({ chart, onBack }) {
         </>
       )}
 
-      {/* primary action button */}
+      {/* primary action */}
       <button
         className="btn"
         onClick={openPreview}
