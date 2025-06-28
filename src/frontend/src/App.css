@@ -157,7 +157,7 @@ select{
 /* disable page scroll while modal is open */
 body.modal-open{overflow:hidden;}
 
-/* ---------- SPINNER ---------- */
+/* ---------- SPINNER (duplicate block kept for safety) ---------- */
 @keyframes spin{to{transform:rotate(360deg);}}
 .spinner{
   width:24px;
@@ -167,4 +167,24 @@ body.modal-open{overflow:hidden;}
   border-radius:50%;
   animation:spin 1s linear infinite;
   margin:auto;
+}
+
+/* ────────────────────────────────────────────────────────────────
+   NEW STYLES FOR “EDIT VALUES” BUTTON
+   ────────────────────────────────────────────────────────────── */
+
+/* container around the override editor so we can absolutely-position */
+.ovr-wrapper{
+  position:relative;
+}
+
+/* floating button */
+.edit-fab{
+  position:absolute;
+  top:6px;
+  right:6px;
+  z-index:10;
+  padding:.35rem .9rem;
+  font-size:.8rem;
+  line-height:1.1;
 }
