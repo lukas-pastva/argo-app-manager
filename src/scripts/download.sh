@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #───────────────────────────────────────────────────────────────────────────────
-#  install.sh   –   v2.9  (robust yq filter)
+#  download.sh  –  v1.0
+#  *For “Download Helm chart only” requests from Helm-Toggler*
 #───────────────────────────────────────────────────────────────────────────────
 set -Eeuo pipefail
 [[ ${DEBUG:-false} == "true" ]] && set -x
@@ -10,28 +11,20 @@ trap 'log "❌  FAILED (line $LINENO) 👉 «$BASH_COMMAND»"; exit 1' ERR
 echo -e "\n\e[1;33m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\e[0m"
 
 ###############################################################################
-# 0) Workflow inputs
+# 0) Workflow inputs  (Argo substitutes these before execution)
 ###############################################################################
-var_release="{{inputs.parameters.var_release}}"
-var_name="{{inputs.parameters.var_name}}"
 var_chart="{{inputs.parameters.var_chart}}"
 var_version="{{inputs.parameters.var_version}}"
-var_namespace="{{inputs.parameters.var_namespace}}"
 var_repo="{{inputs.parameters.var_repo}}"
-var_userValuesYaml="{{inputs.parameters.var_userValuesYaml}}"
 
-for p in var_release var_name var_chart var_version var_namespace var_repo \
-         var_userValuesYaml; do
+for p in var_chart var_version var_repo; do
   [[ ${!p} =~ \{\{.*\}\} ]] && { log "🚫  $p not substituted – abort"; exit 1; }
 done
 
-log "🚀  Request:"
-log "    • release    = ${var_release}"
-log "    • name(app)  = ${var_name}"
-log "    • namespace  = ${var_namespace}"
-log "    • chart      = ${var_chart}@${var_version}"
-log "    • helm repo  = ${var_repo}"
-log "    • values     = $(printf '%s' "${var_userValuesYaml}" | wc -c) bytes"
+log "📦  Download request:"
+log "    • chart     = ${var_chart}"
+log "    • version   = ${var_version}"
+log "    • helm repo = ${var_repo}"
 
 ###############################################################################
 # 1) Mandatory env
@@ -45,22 +38,13 @@ log "🔑  Git user:    $GIT_USER <$GIT_EMAIL>"
 log "🌐  GitOps repo: $GITOPS_REPO"
 
 ###############################################################################
-# 2) Paths
+# 2) Paths / settings
 ###############################################################################
-APPS_DIR="${APPS_DIR:-.}"
-APP_FILE_NAME="${APP_FILE_NAME:-app-of-apps.yaml}"
-VALUES_SUBDIR="${VALUES_SUBDIR:-values}"
-CHARTS_ROOT="charts/external"
+CHARTS_ROOT="external"           # where charts live inside repo
 PUSH_BRANCH="${PUSH_BRANCH:-main}"
 
-apps_file="${APPS_DIR}/${APP_FILE_NAME}"
-values_file="${VALUES_SUBDIR}/${var_release}.yml"
 chart_path="${CHARTS_ROOT}/${var_chart}/${var_chart}/${var_version}"
-
-log "📁  Paths:"
-log "    • apps_file   = ${apps_file}"
-log "    • values_file = ${values_file}"
-log "    • chart_path  = ${chart_path}"
+log "📁  chart_path  = ${chart_path}"
 
 ###############################################################################
 # 3) Clone repo
@@ -81,7 +65,7 @@ git config user.email "$GIT_EMAIL"
 git config user.name  "$GIT_USER"
 
 if [[ $PUSH_BRANCH == "new" ]]; then
-  branch="helm-${var_release}-$(date +%Y%m%d%H%M%S)"
+  branch="helm-download-${var_chart}-${var_version}-$(date +%Y%m%d%H%M%S)"
   git checkout -b "$branch"
 else
   git checkout "$PUSH_BRANCH"
@@ -90,71 +74,32 @@ fi
 log "🌿  Using branch \e[1m$branch\e[0m"
 
 ###############################################################################
-# 4) Write values file
-###############################################################################
-mkdir -p "$(dirname "$apps_file")"
-[[ -f $apps_file ]] || { echo 'appProjects: []' > "$apps_file"; log "🆕  Created $apps_file"; }
-
-mkdir -p "$(dirname "$values_file")"
-printf '%s\n' "$var_userValuesYaml" > "$values_file"
-log "📝  Values → $values_file"
-
-###############################################################################
-# 5) Download Helm chart
+# 4) Download chart (if not cached)
 ###############################################################################
 if [[ -d $chart_path ]]; then
-  log "📦  Chart already cached → $chart_path"
-else
-  log "⬇️   helm pull → $chart_path"
-  tempc="$(mktemp -d)"
-  helm pull "${var_chart}" --repo "${var_repo}" --version "${var_version}" -d "$tempc" > /dev/null
-  tar -xzf "$tempc/${var_chart}-${var_version}.tgz" -C "$tempc"
-  mkdir -p "$chart_path"
-  mv "$tempc/${var_chart}/"* "$chart_path/"
-  rm -rf "$tempc"
-  log "✅  Chart extracted"
-fi
-
-###############################################################################
-# 6) Upsert Application block via yq (v4)
-###############################################################################
-command -v yq >/dev/null || { log "❌  yq v4 required"; exit 1; }
-log "🛠  yq version: $(yq --version)"
-
-export VAR_NAME="${var_name}"
-export CHART_PATH="${chart_path}"
-export GITOPS_REPO
-
-yq_filter='.appProjects = (.appProjects // []) |
-  (.appProjects) |= map(select(.name != env(VAR_NAME))) |
-  .appProjects += [{
-    "name": env(VAR_NAME),
-    "applications": [{
-      "name":       env(VAR_NAME),
-      "repoURL":    env(GITOPS_REPO),
-      "path":       env(CHART_PATH),
-      "autoSync":   true,
-      "valueFiles": true
-    }]
-  }]'
-
-log "🔧  yq filter: ${yq_filter}"
-yq eval -i "$yq_filter" "$apps_file"
-
-###############################################################################
-# 7) Commit & push
-###############################################################################
-git add "$apps_file" "$values_file" "$chart_path"
-git status --short
-
-if git diff --cached --quiet; then
-  log "ℹ️  No change — exiting."
+  log "✅  Chart already present → $chart_path  (nothing to do)"
   exit 0
 fi
 
-git commit -m "feat(${var_name}): add/update ${var_chart} ${var_version}"
+log "⬇️   helm pull → $chart_path"
+tempc="$(mktemp -d)"
+helm pull "${var_chart}" --repo "${var_repo}" --version "${var_version}" -d "$tempc" > /dev/null
+tar -xzf "$tempc/${var_chart}-${var_version}.tgz" -C "$tempc"
+
+mkdir -p "$chart_path"
+mv "$tempc/${var_chart}/"* "$chart_path/"
+rm -rf "$tempc"
+log "🗃  Chart extracted"
+
+###############################################################################
+# 5) Commit & push
+###############################################################################
+git add "$chart_path"
+git status --short
+
+git commit -m "chore: cache ${var_chart} ${var_version}"
 log "📤  Pushing…"
 git push -u origin "$branch"
 
-log "🎉  Done – Application \e[1m${var_name}\e[0m committed!"
+log "🎉  Done – chart cached at \e[1m${chart_path}\e[0m!"
 echo -e "\e[1;32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\e[0m\n"
