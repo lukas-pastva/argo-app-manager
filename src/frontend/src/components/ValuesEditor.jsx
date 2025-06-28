@@ -4,20 +4,16 @@
 
       ① pick version + namespace + release name
       ② (optionally) edit values.yaml
-      ③ preview the *override-only* YAML  (Δ)
+      ③ preview the *override-only* YAML (Δ)
       ④ install ArgoCD Application          – OR –
-         download chart only (cache-fill)
+         download chart only (cache-fill)   ← new
 */
 
 import React, { useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
 import Spinner from "./Spinner.jsx";
 
-/* ────────────────────────────────────────────────────────────────
-   Helpers
-   ────────────────────────────────────────────────────────────── */
-
-/** fetch that auto-chooses .json() or .text() */
+/* ── helpers ──────────────────────────────────────────────────── */
 async function fetchSmart(url, opts = {}) {
   const res = await fetch(url, opts);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -25,7 +21,6 @@ async function fetchSmart(url, opts = {}) {
   return ct.includes("json") ? res.json() : res.text();
 }
 
-/** effect-wrapper that aborts the fetch if the component unmounts */
 function useFetch(url, deps, cb) {
   useEffect(() => {
     if (!url) return;
@@ -33,47 +28,39 @@ function useFetch(url, deps, cb) {
     (async () => {
       try {
         cb(await fetchSmart(url, { signal: ctrl.signal }));
-      } catch {
-        /* caller decides */
-      }
+      } catch {/* caller handles */ }
     })();
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 }
 
-/* ────────────────────────────────────────────────────────────────
-   Component
-   ────────────────────────────────────────────────────────────── */
-
+/* ── component ───────────────────────────────────────────────── */
 export default function ValuesEditor({ chart, onBack }) {
-  /* ─── state ─────────────────────────────────────────────────── */
-  const [versions, setVers]   = useState([]);
-  const [ver, setVer]         = useState("");
-  const [initVals, setInit]   = useState("");     // default YAML from chart
-  const [ns, setNs]           = useState(chart.name);
-  const [rel, setRel]         = useState(chart.name);   // release / Application
-  const [busy, setBusy]       = useState(true);
-  const [preview, setPre]     = useState(null);   // { delta } | null
+  /* state */
+  const [versions, setVers] = useState([]);
+  const [ver, setVer]       = useState("");
+  const [initVals, setInit] = useState("");
+  const [ns,  setNs]        = useState(chart.name);
+  const [rel, setRel]       = useState(chart.name);   // release / name
+  const [busy, setBusy]     = useState(true);
+  const [preview, setPre]   = useState(null);         // { delta } | null
   const [downloadOnly, setDL] = useState(false);
-  const [full, setFull]       = useState(false);  // full-screen YAML editor?
+  const [full, setFull]     = useState(false);        // fullscreen editor
 
-  /* ─── refs ──────────────────────────────────────────────────── */
-  const edDivRef = useRef(null);   // embedded editor host <div>
-  const edRef    = useRef(null);   // Monaco instance
-  const ymlRef   = useRef("");     // live YAML text
+  /* refs */
+  const edDivRef = useRef(null);
+  const edRef    = useRef(null);
+  const ymlRef   = useRef("");
 
-  /* ① fetch version list (CORS-free via backend proxy) */
+  /* ① versions list */
   useFetch(
     `/api/chart/versions?owner=${chart.repoName}&chart=${chart.name}`,
     [chart.repoName, chart.name],
-    (arr = []) => {
-      setVers(arr);
-      setVer(arr[0] || "");
-    },
+    (arr = []) => { setVers(arr); setVer(arr[0] || ""); }
   );
 
-  /* ② fetch default values whenever the version changes */
+  /* ② default values for selected ver */
   useEffect(() => {
     if (!ver) return;
     let done = false;
@@ -81,44 +68,35 @@ export default function ValuesEditor({ chart, onBack }) {
       setBusy(true);
       try {
         const yml = await fetchSmart(
-          `/api/chart/values?pkgId=${chart.packageId}&version=${ver}`,
+          `/api/chart/values?pkgId=${chart.packageId}&version=${ver}`
         );
-        if (!done) {
-          setInit(yml);
-          ymlRef.current = yml;
-          setBusy(false);
-        }
+        if (!done) { setInit(yml); ymlRef.current = yml; setBusy(false); }
       } catch {
         if (!done) {
           const msg = "# (no default values found)";
-          setInit(msg);
-          ymlRef.current = msg;
-          setBusy(false);
+          setInit(msg); ymlRef.current = msg; setBusy(false);
         }
       }
     })();
-    return () => {
-      done = true;
-    };
+    return () => { done = true; };
   }, [chart.packageId, ver]);
 
-  /* ③ mount Monaco once per session */
+  /* ③ mount Monaco once */
   useEffect(() => {
     if (busy || !edDivRef.current || edRef.current) return;
     edRef.current = monaco.editor.create(edDivRef.current, {
       value: initVals,
-      language: "yaml",
+      language : "yaml",
       automaticLayout: true,
-      minimap: { enabled: false },
+      minimap  : { enabled:false }
     });
     edRef.current.onDidChangeModelContent(() => {
       ymlRef.current = edRef.current.getValue();
     });
     return () => edRef.current?.dispose();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [busy]);
+  }, [busy, initVals]);
 
-  /* ─── full-screen editor overlay ────────────────────────────── */
+  /* ── fullscreen helper ─────────────────────────────────────── */
   function FullscreenEditor() {
     const ref = useRef(null);
     useEffect(() => {
@@ -127,172 +105,111 @@ export default function ValuesEditor({ chart, onBack }) {
         value: ymlRef.current,
         language: "yaml",
         automaticLayout: true,
-        minimap: { enabled: false },
+        minimap: { enabled:false }
       });
       e.onDidChangeModelContent(() => {
         ymlRef.current = e.getValue();
       });
-      const esc = ev => {
-        if (ev.key === "Escape") setFull(false);
-      };
+      const esc = ev => { if (ev.key === "Escape") setFull(false); };
       window.addEventListener("keydown", esc);
-      return () => {
-        e.dispose();
-        window.removeEventListener("keydown", esc);
-      };
+      return () => { e.dispose(); window.removeEventListener("keydown", esc); };
     }, []);
     return (
-      <div className="modal-overlay" onClick={() => setFull(false)}>
+      <div className="modal-overlay" onClick={()=>setFull(false)}>
         <div
           className="modal-dialog"
-          style={{ width: "90vw", height: "90vh", padding: 0 }}
-          onClick={e => e.stopPropagation()}
+          style={{width:"90vw",height:"90vh",padding:0}}
+          onClick={e=>e.stopPropagation()}
         >
-          <button
-            className="modal-close"
-            onClick={() => setFull(false)}
-            aria-label="close"
-            style={{ zIndex: 10 }}
-          >
-            ×
-          </button>
-          <div
-            ref={ref}
-            style={{
-              width: "100%",
-              height: "100%",
-              borderRadius: "0 0 12px 12px",
-            }}
-          />
+          <button className="modal-close" onClick={()=>setFull(false)}>×</button>
+          <div ref={ref} style={{width:"100%",height:"100%"}}/>
         </div>
       </div>
     );
   }
 
-  /* ─── Δ-preview helpers ─────────────────────────────────────── */
-  async function openPreview() {
-    if (downloadOnly) {
-      deploy("");            // no preview in download-only mode
+  /* ── Δ preview helper ──────────────────────────────────────── */
+  async function openPreview(){
+    if(downloadOnly){                // skip preview for pure download
+      deploy("");
       return;
     }
     setBusy(true);
-    try {
-      const delta = await fetchSmart("/api/delta", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          defaultYaml: initVals,
-          userYaml: ymlRef.current,
-        }),
+    try{
+      const delta=await fetchSmart("/api/delta",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({ defaultYaml:initVals, userYaml:ymlRef.current })
       });
       setPre({ delta });
-    } catch (e) {
-      console.error("Δ-preview error:", e);
-      alert("Could not compute YAML delta – see console.");
-    } finally {
-      setBusy(false);
-    }
+    }catch(e){
+      console.error("Δ-preview failed:",e);
+      alert("Unable to compute YAML delta. See console.");
+    }finally{ setBusy(false); }
   }
 
-  /* ─── send install / download request ───────────────────────── */
-  async function deploy(deltaOverride = null) {
-    const deltaStr =
-      deltaOverride !== null
-        ? deltaOverride
-        : (preview?.delta || "").trim() || "# (no overrides)";
+  /* ── main action (install / download) ──────────────────────── */
+  async function deploy(deltaOverride){
+    const deltaStr = deltaOverride ?? (
+      (preview?.delta || "").trim() || "# (no overrides)"
+    );
 
     const payload = {
-      chart: chart.name,
-      repo: chart.repoURL,      // Helm repo URL (for script to pull .tgz)
-      version: ver,
-      release: rel,
-      name: rel,                // <-- explicit Application name (NEW)
-      namespace: ns,
+      name      : rel,               // explicit Application name
+      release   : rel,               // kept for backend logic
+      namespace : ns,
+      chart     : chart.name,
+      version   : ver,
+      repo      : chart.repoURL,
       userValuesYaml:
         downloadOnly || deltaStr === "# (no overrides)"
           ? ""
-          : btoa(unescape(encodeURIComponent(deltaStr))), // base64
+          : btoa(unescape(encodeURIComponent(deltaStr)))
     };
 
+    const endpoint = downloadOnly ? "/api/download" : "/api/apps";
+
     setBusy(true);
-    await fetch("/api/apps", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+    await fetch(endpoint,{
+      method :"POST",
+      headers:{"Content-Type":"application/json"},
+      body   : JSON.stringify(payload)
     });
     setBusy(false);
-    alert(downloadOnly ? "Download request sent!" : "Install sent!");
+    alert(downloadOnly ? "Download request sent!" : "Install request sent!");
     onBack();
   }
 
-  /* ─── preview modal ─────────────────────────────────────────── */
-  function PreviewModal() {
-    const mRef = useRef(null);
-    useEffect(() => {
-      if (!mRef.current) return;
-      const e = monaco.editor.create(mRef.current, {
-        value: preview.delta || "# (no overrides)",
-        language: "yaml",
-        readOnly: true,
-        automaticLayout: true,
-        minimap: { enabled: false },
+  /* ── preview modal ─────────────────────────────────────────── */
+  function PreviewModal(){
+    const mRef=useRef(null);
+    useEffect(()=>{
+      if(!mRef.current) return;
+      const e=monaco.editor.create(mRef.current,{
+        value:preview.delta||"# (no overrides)",
+        language:"yaml",
+        readOnly:true,
+        automaticLayout:true,
+        minimap:{enabled:false}
       });
-      return () => e.dispose();
-    }, []);
-
-    return (
-      <div className="modal-overlay" onClick={() => setPre(null)}>
-        <div
-          className="modal-dialog"
-          style={{ width: "64vw", maxWidth: 900 }}
-          onClick={e => e.stopPropagation()}
-        >
-          <button
-            className="modal-close"
-            onClick={() => setPre(null)}
-            aria-label="close"
-          >
-            ×
-          </button>
-          <h2 style={{ margin: "0 0 .5rem" }}>Override values preview</h2>
-          <p
-            style={{
-              margin: "0 0 1rem",
-              fontSize: ".85rem",
-              color: "var(--text-light)",
-            }}
-          >
+      return ()=>e.dispose();
+    },[]);
+    return(
+      <div className="modal-overlay" onClick={()=>setPre(null)}>
+        <div className="modal-dialog" style={{width:"64vw",maxWidth:900}}
+             onClick={e=>e.stopPropagation()}>
+          <button className="modal-close" onClick={()=>setPre(null)}>×</button>
+          <h2 style={{margin:"0 0 .5rem"}}>Override values preview</h2>
+          <p style={{margin:"0 0 1rem",fontSize:".85rem",color:"var(--text-light)"}}>
             Only the keys that differ from chart defaults will be saved.
           </p>
-          <div
-            ref={mRef}
-            style={{
-              height: "50vh",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-            }}
-          />
-          <div
-            style={{
-              display: "flex",
-              gap: "1rem",
-              justifyContent: "flex-end",
-              marginTop: "1.1rem",
-            }}
-          >
-            <button
-              className="btn-secondary"
-              onClick={() => setPre(null)}
-              disabled={busy}
-            >
+          <div ref={mRef} style={{height:"50vh",border:"1px solid var(--border)",borderRadius:6}}/>
+          <div style={{display:"flex",gap:"1rem",justifyContent:"flex-end",marginTop:"1.1rem"}}>
+            <button className="btn-secondary" onClick={()=>setPre(null)} disabled={busy}>
               Back
             </button>
-            <button
-              className="btn"
-              onClick={() => deploy(preview.delta)}
-              disabled={busy}
-            >
-              {busy ? "Working…" : "Install"}
+            <button className="btn" onClick={()=>deploy()} disabled={busy}>
+              {busy?"Saving…":"Install"}
             </button>
           </div>
         </div>
@@ -300,54 +217,24 @@ export default function ValuesEditor({ chart, onBack }) {
     );
   }
 
-  /* ─── header (logo + meta) ──────────────────────────────────── */
-  function ChartHeader() {
-    return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          gap: "1rem",
-          marginBottom: "1.1rem",
-        }}
-      >
-        {chart.logo && (
-          <img
-            src={chart.logo}
-            alt=""
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 6,
-              objectFit: "contain",
-              background: "#fff",
-              flexShrink: 0,
-            }}
-          />
+  /* ── header ───────────────────────────────────────────────── */
+  function ChartHeader(){
+    return(
+      <div style={{display:"flex",alignItems:"flex-start",gap:"1rem",marginBottom:"1.1rem"}}>
+        {chart.logo&&(
+          <img src={chart.logo} alt="" style={{
+            width:48,height:48,borderRadius:6,objectFit:"contain",background:"#fff",flexShrink:0
+          }}/>
         )}
-        <div style={{ minWidth: 0 }}>
-          <h2 style={{ margin: 0 }}>{chart.displayName || chart.name}</h2>
-          {chart.repoName && (
-            <p
-              style={{
-                margin: ".1rem 0 0",
-                fontSize: ".83rem",
-                color: "var(--text-light)",
-              }}
-            >
-              {chart.repoName}
-              {chart.latest ? ` · latest ${chart.latest}` : ""}
+        <div style={{minWidth:0}}>
+          <h2 style={{margin:0}}>{chart.displayName||chart.name}</h2>
+          {chart.repoName&&(
+            <p style={{margin:".1rem 0 0",fontSize:".83rem",color:"var(--text-light)"}}>
+              {chart.repoName}{chart.latest?` · latest ${chart.latest}`:""}
             </p>
           )}
-          {chart.description && (
-            <p
-              style={{
-                margin: ".45rem 0 0",
-                fontSize: ".9rem",
-                color: "var(--text-light)",
-                maxWidth: "60ch",
-              }}
-            >
+          {chart.description&&(
+            <p style={{margin:".45rem 0 0",fontSize:".9rem",color:"var(--text-light)",maxWidth:"60ch"}}>
               {chart.description}
             </p>
           )}
@@ -356,96 +243,56 @@ export default function ValuesEditor({ chart, onBack }) {
     );
   }
 
-  /* ─── render ────────────────────────────────────────────────── */
-  return (
+  /* ── render ───────────────────────────────────────────────── */
+  return(
     <>
-      {preview && <PreviewModal />}
-      {full && <FullscreenEditor />}
+      {preview&&<PreviewModal/>}
+      {full&&<FullscreenEditor/>}
 
-      <button className="btn-secondary btn-back" onClick={onBack}>
-        ← Back
-      </button>
+      <button className="btn-secondary btn-back" onClick={onBack}>← Back</button>
 
-      <ChartHeader />
+      <ChartHeader/>
 
-      {/* version selector */}
       <label>Version</label>
       {versions.length ? (
-        <select value={ver} onChange={e => setVer(e.target.value)}>
-          {versions.map(v => (
-            <option key={v}>{v}</option>
-          ))}
+        <select value={ver} onChange={e=>setVer(e.target.value)}>
+          {versions.map(v=><option key={v}>{v}</option>)}
         </select>
-      ) : (
-        <em>no versions found</em>
-      )}
+      ) : <em>no versions found</em>}
 
-      {/* release & namespace inputs */}
-      <label style={{ marginTop: "1rem" }}>Application (release) name</label>
-      <input
-        value={rel}
-        onChange={e => setRel(e.target.value)}
-        style={{ width: "100%", padding: ".55rem .8rem", fontSize: ".95rem" }}
-      />
+      <label style={{marginTop:"1rem"}}>Application (release) name</label>
+      <input value={rel} onChange={e=>setRel(e.target.value)}
+             style={{width:"100%",padding:".55rem .8rem",fontSize:".95rem"}}/>
 
-      <label style={{ marginTop: "1rem" }}>Namespace</label>
-      <input
-        value={ns}
-        onChange={e => setNs(e.target.value)}
-        style={{ width: "100%", padding: ".55rem .8rem", fontSize: ".95rem" }}
-      />
+      <label style={{marginTop:"1rem"}}>Namespace</label>
+      <input value={ns} onChange={e=>setNs(e.target.value)}
+             style={{width:"100%",padding:".55rem .8rem",fontSize:".95rem"}}/>
 
-      {/* download-only toggle */}
-      <label style={{ marginTop: "1.2rem", display: "flex", gap: ".5rem" }}>
-        <input
-          type="checkbox"
-          checked={downloadOnly}
-          onChange={e => setDL(e.target.checked)}
-          style={{ transform: "translateY(2px)" }}
-        />
+      <label style={{marginTop:"1.2rem",display:"flex",gap:".5rem"}}>
+        <input type="checkbox" checked={downloadOnly}
+               onChange={e=>setDL(e.target.checked)}
+               style={{transform:"translateY(2px)"}}/>
         <span>I want only to download this Helm chart (do not install)</span>
       </label>
 
-      {/* editor – hidden in download-only mode */}
       {!downloadOnly && (
-        <>
-          {busy ? (
-            <div className="editor-placeholder">
-              <Spinner size={36} />
-            </div>
-          ) : (
-            <div style={{ position: "relative" }}>
-              <button
-                className="btn-secondary"
-                style={{
-                  position: "absolute",
-                  top: 6,
-                  right: 6,
-                  padding: ".25rem .6rem",
-                  fontSize: ".8rem",
-                  zIndex: 5,
-                }}
-                onClick={() => setFull(true)}
-              >
-                ⤢ Full screen
-              </button>
-              <div ref={edDivRef} className="editor-frame" />
-            </div>
-          )}
-        </>
+        busy ? (
+          <div className="editor-placeholder"><Spinner size={36}/></div>
+        ) : (
+          <div style={{position:"relative"}}>
+            <button className="btn-secondary" style={{
+              position:"absolute",top:6,right:6,padding:".25rem .6rem",fontSize:".8rem",zIndex:5
+            }} onClick={()=>setFull(true)}>⤢ Full screen</button>
+            <div ref={edDivRef} className="editor-frame"/>
+          </div>
+        )
       )}
 
-      {/* primary action */}
-      <button
-        className="btn"
-        onClick={openPreview}
-        disabled={busy || !ver || !rel || !ns}
-      >
+      <button className="btn" onClick={openPreview}
+              disabled={busy||!ver||!rel||!ns}>
         {busy
           ? "Working…"
-          : downloadOnly
-          ? "Download chart"
-          : "Install"}
+          : downloadOnly ? "Download chart" : "Install"}
       </button>
     </>
   );
