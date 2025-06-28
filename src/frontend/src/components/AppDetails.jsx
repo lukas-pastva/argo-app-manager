@@ -3,67 +3,69 @@
     Modal that shows
       • chart default values
       • override values
-      • (optional) chart meta-info – description, home, maintainers
-        (handled defensively in case meta is missing)
+      • optional meta (description / home / maintainers)
 */
 
 import React, { useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
 import Spinner from "./Spinner.jsx";
 
+/* helper ────────────────────────────────────────────
+   returns { chart, version } for *either* source style */
+function chartInfo(app) {
+  if (app.chart) {
+    return { chart: app.chart, version: app.targetRevision || "" };
+  }
+  const seg = (app.path || "").split("/").filter(Boolean);
+  return { chart: seg.at(-2) || "", version: seg.at(-1) || "" };
+}
+
 export default function AppDetails({ project, file, app, onClose }) {
-  /* ─── state ────────────────────────────────────────────────── */
+  /* ── state ─────────────────────────────────────────────── */
   const [vals, setVals] = useState({
     defaultValues: "",
     overrideValues: "",
-    meta: {}, // might be absent
+    meta: {},               // may be absent
   });
   const [loading, setLoading] = useState(true);
 
-  /* ─── refs for the two read-only editors ───────────────────── */
+  /* ── refs for the two read-only editors ─────────────────── */
   const defRef = useRef(null);
   const ovrRef = useRef(null);
 
-  /* ─── lock body scroll while modal is open ─────────────────── */
+  /* ── lock body scroll while modal open ──────────────────── */
   useEffect(() => {
     document.body.classList.add("modal-open");
     return () => document.body.classList.remove("modal-open");
   }, []);
 
-  /* ─── fetch values once -------------------------------------- */
+  /* ── fetch chart + values once ──────────────────────────── */
   useEffect(() => {
-    const {
-      name,
-      chart,
-      targetRevision: version,
-      repoURL,
-      path: chartPath,
-    } = app;
-
+    const { chart, version } = chartInfo(app);
     const qs = new URLSearchParams({
       project,
-      name,
+      name   : app.name,
       chart,
       version,
-      repoURL,
-      path: chartPath,
+      repoURL: app.repoURL,
+      path   : app.path,
       file,
     });
 
     fetch(`/api/app/values?${qs.toString()}`)
       .then((r) => r.json())
-      .then((json) => {
+      .then((j) => {
         setVals({
-          defaultValues: json.defaultValues || "",
-          overrideValues: json.overrideValues || "",
-          meta: json.meta || {},
+          defaultValues : j.defaultValues  || "",
+          overrideValues: j.overrideValues || "",
+          meta          : j.meta           || {},
         });
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, [project, file, app]);
 
-  /* ─── mount Monaco viewers once data is ready ---------------- */
+  /* ── mount Monaco viewers when data ready ───────────────── */
   useEffect(() => {
     if (loading || !defRef.current) return;
 
@@ -74,23 +76,23 @@ export default function AppDetails({ project, file, app, onClose }) {
       minimap: { enabled: false },
     };
 
-    const ed1 = monaco.editor.create(defRef.current, {
+    const e1 = monaco.editor.create(defRef.current, {
       value: vals.defaultValues || "# (no values.yaml found)",
       ...common,
     });
-    const ed2 = monaco.editor.create(ovrRef.current, {
+    const e2 = monaco.editor.create(ovrRef.current, {
       value: vals.overrideValues || "# (no override file)",
       ...common,
     });
 
     return () => {
-      ed1.dispose();
-      ed2.dispose();
+      e1.dispose();
+      e2.dispose();
     };
   }, [loading, vals]);
 
-  /* ─── tiny component for optional meta block ----------------- */
-  function MetaBox() {
+  /* ── tiny component for optional meta box ───────────────── */
+  function Meta() {
     const { description = "", home = "", maintainers = [] } = vals.meta ?? {};
     if (!description && !home && maintainers.length === 0) return null;
 
@@ -106,7 +108,6 @@ export default function AppDetails({ project, file, app, onClose }) {
         }}
       >
         {description && <p style={{ margin: 0 }}>{description}</p>}
-
         {(home || maintainers.length) && (
           <p style={{ margin: ".6rem 0 0", fontSize: ".85rem" }}>
             {home && (
@@ -129,13 +130,15 @@ export default function AppDetails({ project, file, app, onClose }) {
     );
   }
 
-  /* ─── unified close helper ─────────────────────────────────── */
+  /* ── unified close helper ───────────────────────────────── */
   const close = () => {
     document.body.classList.remove("modal-open");
     onClose();
   };
 
-  /* ─── render ───────────────────────────────────────────────── */
+  /* ── render ─────────────────────────────────────────────── */
+  const { chart, version } = chartInfo(app);
+
   return (
     <div className="modal-overlay" onClick={close}>
       <div
@@ -152,8 +155,8 @@ export default function AppDetails({ project, file, app, onClose }) {
         </h2>
 
         <p style={{ margin: 0 }}>
-          <strong>{app.chart || "(path-based chart)"}</strong>
-          {app.targetRevision && <> @ {app.targetRevision}</>}
+          <strong>{chart || "(unknown chart)"}</strong>
+          {version && ` @ ${version}`}
           {app.repoURL && (
             <>
               <br />
@@ -168,7 +171,7 @@ export default function AppDetails({ project, file, app, onClose }) {
           </div>
         ) : (
           <>
-            <MetaBox />
+            <Meta />
 
             <div
               style={{
