@@ -1,13 +1,23 @@
 /*  ValuesEditor.jsx
     ───────────────────────────────────────────────────────────────
-    Install / Download flow with full-screen YAML editor
+    “Install chart” flow – lets the user
+
+      ① pick version + namespace + release name
+      ② (optionally) edit values.yaml
+      ③ preview the *override-only* YAML (Δ)
+      ④ install ArgoCD Application          – OR –
+         download chart only (cache-fill)   ← new
 */
 
 import React, { useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
 import Spinner from "./Spinner.jsx";
 
-/* helper that auto-picks .json() / .text() ---------------------- */
+/* ────────────────────────────────────────────────────────────────
+   Helpers
+   ────────────────────────────────────────────────────────────── */
+
+/** fetch that auto-chooses .json() or .text() */
 async function fetchSmart(url, opts = {}) {
   const res = await fetch(url, opts);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -15,47 +25,55 @@ async function fetchSmart(url, opts = {}) {
   return ct.includes("json") ? res.json() : res.text();
 }
 
-/* abort-aware fetch wrapper ------------------------------------ */
+/** effect-wrapper that aborts the fetch if the component unmounts */
 function useFetch(url, deps, cb) {
   useEffect(() => {
     if (!url) return;
     const ctrl = new AbortController();
     (async () => {
-      try { cb(await fetchSmart(url, { signal: ctrl.signal })); } catch {}
+      try {
+        cb(await fetchSmart(url, { signal: ctrl.signal }));
+      } catch {
+        /* caller decides */
+      }
     })();
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 }
 
-/*────────────────────────────────────────────────────────────────*/
+/* ────────────────────────────────────────────────────────────────
+   Component
+   ────────────────────────────────────────────────────────────── */
+
 export default function ValuesEditor({ chart, onBack }) {
-  /* state ------------------------------------------------------ */
-  const [versions, setVers]   = useState([]);
-  const [ver, setVer]         = useState("");
-  const [initVals, setInit]   = useState("");
-  const [appName, setAppName] = useState(chart.name);
-  const [ns, setNs]           = useState(chart.name);
-  const [busy, setBusy]       = useState(true);
-  const [preview, setPre]     = useState(null);
-  const [downloadOnly, setDL] = useState(false);
-  const [full, setFull]       = useState(false);       // full-screen?
+  /* ─── state ─────────────────────────────────────────────────── */
+  const [versions, setVers] = useState([]);
+  const [ver, setVer] = useState("");
+  const [initVals, setInit] = useState(""); // default YAML from chart
+  const [ns, setNs] = useState(chart.name);
+  const [rel, setRel] = useState(chart.name); // release / Application name
+  const [busy, setBusy] = useState(true);
+  const [preview, setPre] = useState(null); // { delta:string } | null
+  const [downloadOnly, setDLonly] = useState(false);
+  const [full, setFull] = useState(false); // full-screen YAML editor?
 
-  /* refs ------------------------------------------------------- */
-  const baseDivRef    = useRef(null);   // inline editor host
-  const baseEdRef     = useRef(null);   // Monaco instance (inline)
-  const overlayDivRef = useRef(null);   // full-screen host
-  const overlayEdRef  = useRef(null);   // Monaco instance (full)
-  const ymlRef        = useRef("");     // live YAML
+  /* ─── refs ──────────────────────────────────────────────────── */
+  const edDivRef = useRef(null); // embedded editor <div>
+  const edRef = useRef(null); // Monaco editor instance
+  const ymlRef = useRef(""); // live YAML text (no state churn)
 
-  /* fetch versions list --------------------------------------- */
+  /* ① fetch version list (CORS-free via backend proxy) */
   useFetch(
     `/api/chart/versions?owner=${chart.repoName}&chart=${chart.name}`,
     [chart.repoName, chart.name],
-    (arr = []) => { setVers(arr); setVer(arr[0] || ""); },
+    (arr = []) => {
+      setVers(arr);
+      setVer(arr[0] || "");
+    },
   );
 
-  /* fetch default values on version change -------------------- */
+  /* ② fetch default values whenever the version changes */
   useEffect(() => {
     if (!ver) return;
     let done = false;
@@ -65,284 +83,368 @@ export default function ValuesEditor({ chart, onBack }) {
         const yml = await fetchSmart(
           `/api/chart/values?pkgId=${chart.packageId}&version=${ver}`,
         );
-        if (!done) { setInit(yml); ymlRef.current = yml; setBusy(false); }
+        if (!done) {
+          setInit(yml);
+          ymlRef.current = yml;
+          setBusy(false);
+        }
       } catch {
         if (!done) {
           const msg = "# (no default values found)";
-          setInit(msg); ymlRef.current = msg; setBusy(false);
+          setInit(msg);
+          ymlRef.current = msg;
+          setBusy(false);
         }
       }
     })();
-    return () => { done = true; };
+    return () => {
+      done = true;
+    };
   }, [chart.packageId, ver]);
 
-  /* create *inline* Monaco editor (once) ---------------------- */
+  /* ③ mount Monaco exactly once */
   useEffect(() => {
-    if (busy || downloadOnly || !baseDivRef.current || baseEdRef.current)
-      return;
-
-    baseEdRef.current = monaco.editor.create(baseDivRef.current, {
+    if (busy || !edDivRef.current || edRef.current) return;
+    edRef.current = monaco.editor.create(edDivRef.current, {
       value: initVals,
       language: "yaml",
       automaticLayout: true,
       minimap: { enabled: false },
     });
-    baseEdRef.current.onDidChangeModelContent(() => {
-      ymlRef.current = baseEdRef.current.getValue();
+    edRef.current.onDidChangeModelContent(() => {
+      ymlRef.current = edRef.current.getValue();
     });
+    return () => edRef.current?.dispose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy]);
 
-    return () => baseEdRef.current?.dispose();
-  }, [busy, downloadOnly, initVals]);
+  /* ─── full-screen editor helpers ────────────────────────────── */
+  function FullscreenEditor() {
+    const ref = useRef(null);
+    useEffect(() => {
+      if (!ref.current) return;
+      const e = monaco.editor.create(ref.current, {
+        value: ymlRef.current,
+        language: "yaml",
+        automaticLayout: true,
+        minimap: { enabled: false },
+      });
+      e.onDidChangeModelContent(() => {
+        ymlRef.current = e.getValue();
+      });
+      const esc = ev => {
+        if (ev.key === "Escape") setFull(false);
+      };
+      window.addEventListener("keydown", esc);
+      return () => {
+        e.dispose();
+        window.removeEventListener("keydown", esc);
+      };
+    }, []);
+    return (
+      <div className="modal-overlay" onClick={() => setFull(false)}>
+        <div
+          className="modal-dialog"
+          style={{ width: "90vw", height: "90vh", padding: 0 }}
+          onClick={e => e.stopPropagation()}
+        >
+          <button
+            className="modal-close"
+            onClick={() => setFull(false)}
+            aria-label="close"
+            style={{ zIndex: 10 }}
+          >
+            ×
+          </button>
+          <div
+            ref={ref}
+            style={{
+              width: "100%",
+              height: "100%",
+              borderRadius: "0 0 12px 12px",
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
 
-  /* full-screen: create / destroy overlay editor -------------- */
-  useEffect(() => {
-    if (!full) {
-      /* leaving full-screen → sync back value + cleanup */
-      overlayEdRef.current?.dispose();
-      overlayEdRef.current = null;
-      if (baseEdRef.current) {
-        baseEdRef.current.setValue(ymlRef.current);
-        baseDivRef.current.style.display = "";          // un-hide
-      }
-      return;
-    }
-
-    /* entering full-screen */
-    if (!overlayDivRef.current) return;
-    baseDivRef.current.style.display = "none";          // hide inline
-
-    overlayEdRef.current = monaco.editor.create(overlayDivRef.current, {
-      value: ymlRef.current,
-      language: "yaml",
-      automaticLayout: true,
-      minimap: { enabled: false },
-    });
-    overlayEdRef.current.onDidChangeModelContent(() => {
-      ymlRef.current = overlayEdRef.current.getValue();
-    });
-
-    /* Esc to leave full-screen */
-    const h = e => e.key === "Escape" && setFull(false);
-    window.addEventListener("keydown", h);
-
-    return () => window.removeEventListener("keydown", h);
-  }, [full]);
-
-  /* preview helper -------------------------------------------- */
+  /* ─── preview helpers ───────────────────────────────────────── */
   async function openPreview() {
-    if (downloadOnly) return;
+    // download-only mode skips preview
+    if (downloadOnly) {
+      return deploy("");
+    }
     setBusy(true);
     try {
       const delta = await fetchSmart("/api/delta", {
-        method : "POST",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body   : JSON.stringify({ defaultYaml: initVals, userYaml: ymlRef.current }),
+        body: JSON.stringify({
+          defaultYaml: initVals,
+          userYaml: ymlRef.current,
+        }),
       });
       setPre({ delta });
     } catch (e) {
       console.error("Δ-preview error:", e);
       alert("Could not compute YAML delta – see console.");
-    } finally { setBusy(false); }
-  }
-
-  /* install / download --------------------------------------- */
-  async function deploy() {
-    setBusy(true);
-    const url  = downloadOnly ? "/api/download" : "/api/apps";
-    let   body;
-
-    if (downloadOnly) {
-      body = { chart: chart.name, repo: chart.repoURL, version: ver };
-    } else {
-      const deltaStr = (preview?.delta || "").trim() || "# (no overrides)";
-      body = {
-        name:       appName,
-        chart:      chart.name,
-        version:    ver,
-        release:    appName,
-        namespace:  ns,
-        userValuesYaml: btoa(deltaStr),   // base-64 encode
-      };
+    } finally {
+      setBusy(false);
     }
-
-    try {
-      await fetch(url, {
-        method : "POST",
-        headers: { "Content-Type": "application/json" },
-        body   : JSON.stringify(body),
-      });
-      alert(downloadOnly ? "Download triggered!" : "Install request sent!");
-      onBack();
-    } finally { setBusy(false); }
   }
 
-  /* header ----------------------------------------------------- */
-  const Header = () => (
-    <div style={{ display:"flex", gap:"1rem", marginBottom:"1.1rem" }}>
-      {chart.logo && (
-        <img src={chart.logo} alt=""
-             style={{ width:48,height:48,borderRadius:6,
-                      objectFit:"contain",background:"#fff" }}/>
-      )}
-      <div style={{ minWidth:0 }}>
-        <h2 style={{ margin:0 }}>{chart.displayName || chart.name}</h2>
-        {chart.repoName && (
-          <p style={{ margin:".1rem 0 0",fontSize:".83rem",color:"var(--text-light)" }}>
-            {chart.repoName}{chart.latest ? ` · latest ${chart.latest}` : ""}
+  /* ─── install / download action ─────────────────────────────── */
+  async function deploy(deltaOverride = null) {
+    const deltaStr =
+      deltaOverride !== null
+        ? deltaOverride
+        : (preview?.delta || "").trim() || "# (no overrides)";
+    const payload = {
+      chart: chart.name,
+      repo: chart.repoURL, // ← always include Helm repo URL
+      version: ver,
+      release: rel,
+      namespace: ns,
+      userValuesYaml:
+        downloadOnly || deltaStr === "# (no overrides)"
+          ? ""
+          : btoa(unescape(encodeURIComponent(deltaStr))), // base64
+    };
+
+    setBusy(true);
+    await fetch("/api/apps", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    setBusy(false);
+    alert(downloadOnly ? "Download request sent!" : "Install sent!");
+    onBack();
+  }
+
+  /* ─── preview modal ─────────────────────────────────────────── */
+  function PreviewModal() {
+    const mRef = useRef(null);
+    useEffect(() => {
+      if (!mRef.current) return;
+      const e = monaco.editor.create(mRef.current, {
+        value: preview.delta || "# (no overrides)",
+        language: "yaml",
+        readOnly: true,
+        automaticLayout: true,
+        minimap: { enabled: false },
+      });
+      return () => e.dispose();
+    }, []);
+    return (
+      <div className="modal-overlay" onClick={() => setPre(null)}>
+        <div
+          className="modal-dialog"
+          style={{ width: "64vw", maxWidth: 900 }}
+          onClick={e => e.stopPropagation()}
+        >
+          <button
+            className="modal-close"
+            onClick={() => setPre(null)}
+            aria-label="close"
+          >
+            ×
+          </button>
+          <h2 style={{ margin: "0 0 .5rem" }}>Override values preview</h2>
+          <p
+            style={{
+              margin: "0 0 1rem",
+              fontSize: ".85rem",
+              color: "var(--text-light)",
+            }}
+          >
+            Only the keys that differ from chart defaults will be saved.
           </p>
-        )}
-        {chart.description && (
-          <p style={{ margin:".45rem 0 0",fontSize:".9rem",
-                     color:"var(--text-light)",maxWidth:"60ch" }}>
-            {chart.description}</p>
-        )}
-      </div>
-    </div>
-  );
-
-  /*──────────────────────────────── RENDER ───────────────────────────────*/
-  const showEditor = !downloadOnly;
-
-  return (
-    <>
-      {/* full-screen overlay (only when active) */}
-      {full && showEditor && (
-        <div className="modal-overlay" onClick={() => setFull(false)}>
           <div
-            className="modal-dialog"
-            style={{ width:"94vw",height:"88vh",padding:"1rem" }}
-            onClick={e => e.stopPropagation()}
+            ref={mRef}
+            style={{
+              height: "50vh",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+            }}
+          />
+          <div
+            style={{
+              display: "flex",
+              gap: "1rem",
+              justifyContent: "flex-end",
+              marginTop: "1.1rem",
+            }}
           >
             <button
-              style={{
-                position:"absolute",top:".4rem",right:".6rem",
-                fontSize:"1.8rem",border:"none",background:"none",
-                color:"var(--text-light)",cursor:"pointer",
-                zIndex:2000,                          /* always on top */
-              }}
-              onClick={() => setFull(false)}
-              aria-label="close"
-            >×</button>
-
-            <div
-              ref={overlayDivRef}
-              style={{
-                height:"100%",
-                border:"1px solid var(--border)",
-                borderRadius:6,
-                overflow:"hidden",
-              }}
-            />
+              className="btn-secondary"
+              onClick={() => setPre(null)}
+              disabled={busy}
+            >
+              Back
+            </button>
+            <button
+              className="btn"
+              onClick={() => deploy(deltaStr => deltaStr)}
+              disabled={busy}
+            >
+              {busy ? "Saving…" : "Install"}
+            </button>
           </div>
         </div>
-      )}
+      </div>
+    );
+  }
 
-      {/* regular view */}
-      <button className="btn-secondary btn-back" onClick={onBack}>← Back</button>
-      <Header />
+  /* ─── header (logo + meta) ──────────────────────────────────── */
+  function ChartHeader() {
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: "1rem",
+          marginBottom: "1.1rem",
+        }}
+      >
+        {chart.logo && (
+          <img
+            src={chart.logo}
+            alt=""
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 6,
+              objectFit: "contain",
+              background: "#fff",
+              flexShrink: 0,
+            }}
+          />
+        )}
+        <div style={{ minWidth: 0 }}>
+          <h2 style={{ margin: 0 }}>{chart.displayName || chart.name}</h2>
+          {chart.repoName && (
+            <p
+              style={{
+                margin: ".1rem 0 0",
+                fontSize: ".83rem",
+                color: "var(--text-light)",
+              }}
+            >
+              {chart.repoName}
+              {chart.latest ? ` · latest ${chart.latest}` : ""}
+            </p>
+          )}
+          {chart.description && (
+            <p
+              style={{
+                margin: ".45rem 0 0",
+                fontSize: ".9rem",
+                color: "var(--text-light)",
+                maxWidth: "60ch",
+              }}
+            >
+              {chart.description}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
 
+  /* ─── render ────────────────────────────────────────────────── */
+  return (
+    <>
+      {/* overlays */}
+      {preview && <PreviewModal />}
+      {full && <FullscreenEditor />}
+
+      <button className="btn-secondary btn-back" onClick={onBack}>
+        ← Back
+      </button>
+
+      <ChartHeader />
+
+      {/* version selector */}
       <label>Version</label>
       {versions.length ? (
         <select value={ver} onChange={e => setVer(e.target.value)}>
-          {versions.map(v => <option key={v}>{v}</option>)}
+          {versions.map(v => (
+            <option key={v}>{v}</option>
+          ))}
         </select>
-      ) : <em>no versions found</em>}
+      ) : (
+        <em>no versions found</em>
+      )}
 
-      <label style={{ display:"flex",alignItems:"center",gap:".55rem",marginTop:"1rem" }}>
-        <input type="checkbox" checked={downloadOnly} onChange={e=>setDL(e.target.checked)}/>
-        I want <strong>only to download</strong> this Helm chart
+      {/* release / namespace */}
+      <label style={{ marginTop: "1rem" }}>Application (release) name</label>
+      <input
+        value={rel}
+        onChange={e => setRel(e.target.value)}
+        style={{ width: "100%", padding: ".55rem .8rem", fontSize: ".95rem" }}
+      />
+
+      <label style={{ marginTop: "1rem" }}>Namespace</label>
+      <input
+        value={ns}
+        onChange={e => setNs(e.target.value)}
+        style={{ width: "100%", padding: ".55rem .8rem", fontSize: ".95rem" }}
+      />
+
+      {/* download-only toggle */}
+      <label style={{ marginTop: "1.2rem", display: "flex", gap: ".5rem" }}>
+        <input
+          type="checkbox"
+          checked={downloadOnly}
+          onChange={e => setDLonly(e.target.checked)}
+          style={{ transform: "translateY(2px)" }}
+        />
+        <span>I want only to download this Helm chart (do not install)</span>
       </label>
 
-      {showEditor && (
+      {/* editor or spinner – hidden when download-only */}
+      {!downloadOnly && (
         <>
-          <label style={{ marginTop:"1rem" }}>Application&nbsp;name</label>
-          <input
-            value={appName}
-            onChange={e=>setAppName(e.target.value)}
-            style={{ width:"100%",padding:".55rem .8rem",fontSize:".95rem" }}
-          />
-
-          <label style={{ marginTop:"1rem" }}>Namespace</label>
-          <input
-            value={ns}
-            onChange={e=>setNs(e.target.value)}
-            style={{ width:"100%",padding:".55rem .8rem",fontSize:".95rem" }}
-          />
-
           {busy ? (
-            <div className="editor-placeholder"><Spinner size={36}/></div>
+            <div className="editor-placeholder">
+              <Spinner size={36} />
+            </div>
           ) : (
-            <div style={{ position:"relative" }}>
+            <div style={{ position: "relative" }}>
               <button
                 className="btn-secondary"
                 style={{
-                  position:"absolute",top:6,right:6,fontSize:".8rem",
-                  padding:".25rem .6rem",zIndex:1000
+                  position: "absolute",
+                  top: 6,
+                  right: 6,
+                  padding: ".25rem .6rem",
+                  fontSize: ".8rem",
+                  zIndex: 5,
                 }}
-                onClick={()=>setFull(true)}
-                title="Maximise editor"
-              >⤢</button>
-
-              <div
-                ref={baseDivRef}
-                className="editor-frame"
-                style={{ display: full ? "none" : "block" }}
-              />
+                onClick={() => setFull(true)}
+              >
+                ⤢ Full screen
+              </button>
+              <div ref={edDivRef} className="editor-frame" />
             </div>
           )}
         </>
       )}
 
+      {/* primary action button */}
       <button
         className="btn"
-        style={{ marginTop:"1.2rem" }}
-        disabled={busy || !ver}
-        onClick={downloadOnly ? deploy : openPreview}
+        onClick={openPreview}
+        disabled={busy || !ver || !rel || !ns}
       >
         {busy
           ? "Working…"
           : downloadOnly
-          ? "Download"
-          : "Install ArgoCD Application"}
+          ? "Download chart"
+          : "Install"}
       </button>
-
-      {/* YAML Δ preview modal */}
-      {preview && !downloadOnly && (
-        <div className="modal-overlay" onClick={()=>setPre(null)}>
-          <div
-            className="modal-dialog"
-            style={{ width:"64vw",maxWidth:900 }}
-            onClick={e=>e.stopPropagation()}
-          >
-            <button className="modal-close" onClick={()=>setPre(null)} aria-label="close">×</button>
-            <h2 style={{ margin:"0 0 .5rem" }}>Override values preview</h2>
-            <p style={{ margin:"0 0 1rem",fontSize:".85rem",color:"var(--text-light)" }}>
-              Only the keys that differ from chart defaults will be saved.
-            </p>
-            <div
-              style={{
-                height:"50vh",border:"1px solid var(--border)",borderRadius:6,
-                overflow:"hidden"
-              }}
-              ref={node=>{
-                if (!node) return;
-                const ed = monaco.editor.create(node,{
-                  value:preview.delta||"# (no overrides)",
-                  language:"yaml",readOnly:true,
-                  automaticLayout:true,minimap:{enabled:false},
-                });
-                return ()=>ed.dispose();
-              }}
-            />
-            <div style={{ display:"flex",gap:"1rem",justifyContent:"flex-end",marginTop:"1.1rem" }}>
-              <button className="btn-secondary" onClick={()=>setPre(null)}>Back</button>
-              <button className="btn" onClick={deploy}>
-                {busy?"Saving…":"Install ArgoCD Application"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }
