@@ -14,6 +14,7 @@ import cfg                          from './config.js';
 import { ensureRepo, listAppFiles } from './git.js';
 import { triggerWebhook,
          triggerDeleteWebhook }     from './argo.js';
+import { deltaYaml }                from './diff.js';   // ← NEW
 
 /* ────────── constants ─────────────────────────────────────────── */
 export const CHARTS_ROOT   = process.env.CHARTS_ROOT   || 'charts';
@@ -222,3 +223,11 @@ app.post('/api/delete', async (r, s) => {
 
 /* ────────── go! ───────────────────────────────────────────────── */
 app.listen(cfg.port, () => console.log(`✔︎ backend listening on ${cfg.port}`));
+/* ════════════════════════════════════════════════════════════════
+   7.  YAML delta API  (override-only YAML preview)
+   ═══════════════════════════════════════════════════════════════ */
+app.post('/api/delta', (req, res) => {
+  const { defaultYaml = '', userYaml = '' } = req.body || {};
+  const delta = deltaYaml(defaultYaml, userYaml);
+  res.type('text/yaml').send(delta);
+});
