@@ -126,6 +126,9 @@ export default function ValuesEditor({ chart, onBack }) {
   }
 
   async function deploy() {
+    const deltaStr =
+      (preview?.delta || "").trim() || "# (no overrides)";
+
     setBusy(true);
     await fetch("/api/apps", {
       method : "POST",
@@ -136,7 +139,7 @@ export default function ValuesEditor({ chart, onBack }) {
         version    : ver,
         release    : chart.name,
         namespace  : ns,
-        userValuesYaml: ymlRef.current
+        userValuesYaml: deltaStr
       })
     });
     setBusy(false);
