@@ -7,13 +7,15 @@ export default function ChartSearch({ onSelect }) {
 
   async function search(t) {
     setQ(t);
-    if (t.length < 4) { setRes([]); return; }      // ← 4-char gate
+    if (t.length < 4) { setRes([]); return; }   // 4-char guard
 
     setLoad(true);
-    const r = await fetch(`/api/search?q=${encodeURIComponent(t)}`).then((r) =>
-      r.json()
-    );
-    setRes(r);
+    const r = await fetch(`/api/search?q=${encodeURIComponent(t)}`).then(r=>r.json());
+    /* dedupe by chart name, keep first hit */
+    const uniq = [];
+    const seen = new Set();
+    r.forEach(p => { if (!seen.has(p.name)) { seen.add(p.name); uniq.push(p);} });
+    setRes(uniq);
     setLoad(false);
   }
 
@@ -22,29 +24,22 @@ export default function ChartSearch({ onSelect }) {
       <div className="search-box">
         <input
           className="search-input"
-          placeholder="Search chart (e.g. grafana)…"
+          placeholder="Type chart name (≥4 chars)…"
           value={q}
-          onChange={(e) => search(e.target.value)}
+          onChange={e => search(e.target.value)}
         />
-        {load && <span style={{ alignSelf: "center" }}>⏳</span>}
+        {load && <span style={{ alignSelf:"center" }}>⏳</span>}
       </div>
 
       {res.length > 0 && (
         <div className="results-list">
-          {res.map((c) => (
+          {res.map(c => (
             <div
-              key={c.repo + "/" + c.name}
+              key={c.name}
               className="result-item"
-              onClick={() => onSelect(c)}
+              onClick={() => onSelect(c)}     /* only name + repo for now */
             >
-              {c.logo && <img src={c.logo} alt="" />}
-              <div>
-                <strong>{c.displayName || c.name}</strong>
-                <br />
-                <small>
-                  {c.repo}/{c.name}:{c.version}
-                </small>
-              </div>
+              <strong>{c.displayName || c.name}</strong>
             </div>
           ))}
         </div>
