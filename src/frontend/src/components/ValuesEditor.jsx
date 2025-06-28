@@ -1,10 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
-import yaml         from "js-yaml";
 import Spinner      from "./Spinner.jsx";
 
-/* ------------------------------------------------------------------ */
-/* generic fetch helper that auto-chooses .json() or .text()          */
+/* ─── helper — fetch that auto-picks json/text ─────────────────── */
 async function fetchSmart(url, { signal } = {}) {
   const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -12,7 +10,7 @@ async function fetchSmart(url, { signal } = {}) {
   return ct.includes("json") ? res.json() : res.text();
 }
 
-/* small effect wrapper with abort-on-unmount                         */
+/* simple effect-wrapper with abort-on-unmount */
 function useFetch(url, deps, cb) {
   useEffect(() => {
     if (!url) return;
@@ -25,7 +23,6 @@ function useFetch(url, deps, cb) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 }
-/* ------------------------------------------------------------------ */
 
 export default function ValuesEditor({ chart, onBack }) {
   const [versions, setVers] = useState([]);
@@ -33,9 +30,9 @@ export default function ValuesEditor({ chart, onBack }) {
   const [vals,     setVals] = useState("");
   const [ns,       setNs ]  = useState(chart.name);
   const [busy,     setBusy] = useState(true);
-  const editorRef  = useRef(null);
+  const edRef      = useRef(null);
 
-  /* ① load version list via backend proxy (no CORS!) ------------------- */
+  /* ① version list via backend (same as before) */
   useFetch(
     `/api/chart/versions?owner=${chart.repoName}&chart=${chart.name}`,
     [chart.repoName, chart.name],
@@ -46,27 +43,16 @@ export default function ValuesEditor({ chart, onBack }) {
     },
   );
 
-  /* ② load default values every time the version changes --------------- */
+  /* ② default values (now proxied through the backend) */
   useEffect(() => {
     if (!ver) return;
     let done = false;
     (async () => {
       setBusy(true);
-
-      /* try Artifact Hub’s /values endpoint – MAY fail on CORS ---------- */
       try {
         const yml = await fetchSmart(
-          `https://artifacthub.io/api/v1/packages/${chart.packageId}/${ver}/values`,
+          `/api/chart/values?pkgId=${chart.packageId}&version=${ver}`,
         );
-        if (!done) { setVals(yml); setBusy(false); return; }
-      } catch {/* (ignore and fall back) */ }
-
-      /* fall back to /templates + stringify ----------------------------- */
-      try {
-        const tpl = await fetchSmart(
-          `https://artifacthub.io/api/v1/packages/${chart.packageId}/${ver}/templates`,
-        );
-        const yml = yaml.dump(tpl.values || {}, { lineWidth: 0 });
         if (!done) { setVals(yml); setBusy(false); }
       } catch (err) {
         console.error("Unable to obtain chart values:", err);
@@ -76,10 +62,10 @@ export default function ValuesEditor({ chart, onBack }) {
     return () => { done = true; };
   }, [chart.packageId, ver]);
 
-  /* ③ mount Monaco once we have something to show ---------------------- */
+  /* ③ mount Monaco once values ready */
   useEffect(() => {
-    if (busy || !editorRef.current) return;
-    const ed = monaco.editor.create(editorRef.current, {
+    if (busy || !edRef.current) return;
+    const ed = monaco.editor.create(edRef.current, {
       value: vals,
       language: "yaml",
       automaticLayout: true,
@@ -89,7 +75,7 @@ export default function ValuesEditor({ chart, onBack }) {
     return () => ed.dispose();
   }, [busy, vals]);
 
-  /* ④ deploy ----------------------------------------------------------- */
+  /* ④ deploy */
   async function submit() {
     if (!window.confirm(`Deploy ${chart.name}@${ver} into “${ns}”?`)) return;
     setBusy(true);
@@ -110,15 +96,13 @@ export default function ValuesEditor({ chart, onBack }) {
     onBack();
   }
 
-  /* ⑤ render ----------------------------------------------------------- */
+  /* ⑤ render (header identical to previous patch) */
   return (
     <>
-      {/* ─── back button ──────────────────────────────────────────────── */}
       <button className="btn-secondary btn-back" onClick={onBack}>
         ← Back
       </button>
 
-      {/* ─── sticky chart-info header ─────────────────────────────────── */}
       <div
         style={{
           display: "flex",
@@ -166,7 +150,6 @@ export default function ValuesEditor({ chart, onBack }) {
         </div>
       </div>
 
-      {/* ─── version selector ─────────────────────────────────────────── */}
       <label>Version</label>
       {versions.length ? (
         <select value={ver} onChange={(e) => setVer(e.target.value)}>
@@ -178,7 +161,6 @@ export default function ValuesEditor({ chart, onBack }) {
         <em>no versions found</em>
       )}
 
-      {/* ─── namespace input ──────────────────────────────────────────── */}
       <label style={{ marginTop: "1rem" }}>Namespace</label>
       <input
         value={ns}
@@ -186,16 +168,14 @@ export default function ValuesEditor({ chart, onBack }) {
         style={{ width: "100%", padding: ".55rem .8rem", fontSize: ".95rem" }}
       />
 
-      {/* ─── editor / spinner ─────────────────────────────────────────── */}
       {busy ? (
         <div className="editor-placeholder">
           <Spinner size={36} />
         </div>
       ) : (
-        <div ref={editorRef} className="editor-frame" />
+        <div ref={edRef} className="editor-frame" />
       )}
 
-      {/* ─── submit button ────────────────────────────────────────────── */}
       <button className="btn" onClick={submit} disabled={busy || !ver}>
         {busy ? "Loading…" : "Install"}
       </button>

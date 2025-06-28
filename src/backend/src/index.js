@@ -23,12 +23,13 @@ const ARTHUB_BASE          = 'https://artifacthub.io/api/v1';
 /* ────────── express bootstrap ────────────────────────────────── */
 const app = express();
 
-/* ❶ – request logger (good for live debugging) */
+/* ── 1) request logger ─────────────────────────────────────────── */
 app.use((req, _res, next) => {
   console.log(`[REQ] ${req.method} ${req.originalUrl}`);
   next();
 });
 
+/* ── 2) CSP (now allows data: URIs for SVG) ────────────────────── */
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -36,13 +37,14 @@ app.use(
         defaultSrc : ["'self'"],
         scriptSrc  : ["'self'"],
         styleSrc   : ["'self'", "'unsafe-inline'"],
-        imgSrc     : ["'self'", 'https://artifacthub.io'],
+        imgSrc     : ["'self'", 'https://artifacthub.io', 'data:'],
         connectSrc : ["'self'", 'https://artifacthub.io'],
         objectSrc  : ["'none'"],
       },
     },
   }),
 );
+
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static('public'));
 app.get('/favicon.ico', (_, res) => res.status(204).end());   // avoid 404 noise
@@ -83,7 +85,7 @@ app.get('/api/apps', async (req, res) => {
 });
 
 /* ════════════════════════════════════════════════════════════════
-   3.  Chart values  – **path-only** (unchanged since last fix)
+   3.  Chart values  (local path lookup)
    ═══════════════════════════════════════════════════════════════ */
 app.get('/api/app/values', async (req, res) => {
   const { name, file: yamlFile, path: chartPath } = req.query;
@@ -98,7 +100,7 @@ app.get('/api/app/values', async (req, res) => {
   const overrideFile = path.join(
     path.dirname(yamlFile),
     VALUES_SUBDIR,
-    `${name}.yml`,          //  switched to .yml in previous patch
+    `${name}.yml`,
   );
   const chartDir = path.join(gitRoot, CHARTS_ROOT, chartPath);
 
@@ -119,9 +121,9 @@ app.get('/api/app/values', async (req, res) => {
   } catch {/* ignore */ }
 
   console.log(
-    `[vals] ${name}\n` +
-    `       override: ${overrideVals ? '✔︎' : '✖︎'} → ${overrideFile}\n` +
-    `       default : ${defaultVals ? '✔︎' : '✖︎'} → ${chartDir}/values.yaml`,
+    `[vals-file] ${name}\n` +
+    `           override: ${overrideVals ? '✔︎' : '✖︎'} → ${overrideFile}\n` +
+    `           default : ${defaultVals ? '✔︎' : '✖︎'} → ${chartDir}/values.yaml`,
   );
 
   res.json({
@@ -132,10 +134,9 @@ app.get('/api/app/values', async (req, res) => {
 });
 
 /* ════════════════════════════════════════════════════════════════
-   4.  Version list — shared handler
+   4.  Version list  (owner / repo alias)
    ═══════════════════════════════════════════════════════════════ */
 async function serveVersions(req, res) {
-  /* UI sends owner=… while old API used repo=…              */
   const repo  = req.query.owner || req.query.repo;
   const chart = req.query.chart;
   const limit = req.query.limit || 40;
@@ -160,14 +161,54 @@ async function serveVersions(req, res) {
   }
 }
 
-/* ❷ – original path (kept for backward compatibility) */
-app.get('/api/versions', serveVersions);
-
-/* ❸ – new alias path that the React UI is calling */
-app.get('/api/chart/versions', serveVersions);
+app.get('/api/versions',        serveVersions);   // legacy
+app.get('/api/chart/versions',  serveVersions);   // new
 
 /* ════════════════════════════════════════════════════════════════
-   5.  Proxy deploy / delete webhooks
+   5.  **NEW**  Chart default values proxy  (CORS-free)
+   ═══════════════════════════════════════════════════════════════ */
+app.get('/api/chart/values', async (req, res) => {
+  const pkgId   = req.query.pkgId;
+  const version = req.query.version;
+
+  if (!pkgId || !version) {
+    return res.status(400).json({ error: 'pkgId & version required' });
+  }
+
+  console.log(`[vals-api] pkgId=${pkgId} ver=${version}`);
+
+  /* helper to fetch plain text (YAML) */
+  async function fetchText(url) {
+    const { data } = await axios.get(url, { timeout: 10_000, responseType: 'text' });
+    return data;
+  }
+
+  /* ① try the dedicated /values endpoint … */
+  try {
+    const yml = await fetchText(
+      `${ARTHUB_BASE}/packages/${encodeURIComponent(pkgId)}/${encodeURIComponent(version)}/values`,
+    );
+    return res.type('text/yaml').send(yml);
+  } catch (e) {
+    console.warn('[ArtHub] /values failed – will try /templates:', e.message);
+  }
+
+  /* ② …fallback to /templates and stringify                             */
+  try {
+    const tpl = await axios.get(
+      `${ARTHUB_BASE}/packages/${encodeURIComponent(pkgId)}/${encodeURIComponent(version)}/templates`,
+      { timeout: 10_000 },
+    );
+    const yml = yaml.dump(tpl.data.values || {}, { lineWidth: 0 });
+    return res.type('text/yaml').send(yml);
+  } catch (e) {
+    console.error('[ArtHub] templates fallback failed:', e.message);
+    return res.status(500).json({ error: 'Unable to fetch chart values' });
+  }
+});
+
+/* ════════════════════════════════════════════════════════════════
+   6.  Proxy deploy / delete webhooks
    ═══════════════════════════════════════════════════════════════ */
 app.post('/api/sync',   async (r, s) => {
   try { await triggerWebhook(r.body.name,  r.body.namespace);   s.json({ ok:true }); }
