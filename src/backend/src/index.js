@@ -22,6 +22,13 @@ const ARTHUB_BASE          = 'https://artifacthub.io/api/v1';
 
 /* ────────── express bootstrap ────────────────────────────────── */
 const app = express();
+
+/* ❶ – request logger (good for live debugging) */
+app.use((req, _res, next) => {
+  console.log(`[REQ] ${req.method} ${req.originalUrl}`);
+  next();
+});
+
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -76,7 +83,7 @@ app.get('/api/apps', async (req, res) => {
 });
 
 /* ════════════════════════════════════════════════════════════════
-   3.  Chart values  – **NOW 100 % “path”-only**
+   3.  Chart values  – **path-only** (unchanged since last fix)
    ═══════════════════════════════════════════════════════════════ */
 app.get('/api/app/values', async (req, res) => {
   const { name, file: yamlFile, path: chartPath } = req.query;
@@ -91,7 +98,7 @@ app.get('/api/app/values', async (req, res) => {
   const overrideFile = path.join(
     path.dirname(yamlFile),
     VALUES_SUBDIR,
-    `${name}.yml`,          //  ← switched to .yml
+    `${name}.yml`,          //  switched to .yml in previous patch
   );
   const chartDir = path.join(gitRoot, CHARTS_ROOT, chartPath);
 
@@ -125,11 +132,19 @@ app.get('/api/app/values', async (req, res) => {
 });
 
 /* ════════════════════════════════════════════════════════════════
-   4.  Version list from Artifact Hub (unchanged)
+   4.  Version list — shared handler
    ═══════════════════════════════════════════════════════════════ */
-app.get('/api/versions', async (req, res) => {
-  const { repo, chart, limit = 40 } = req.query;
-  if (!repo || !chart) return res.status(400).json({ error: 'repo & chart required' });
+async function serveVersions(req, res) {
+  /* UI sends owner=… while old API used repo=…              */
+  const repo  = req.query.owner || req.query.repo;
+  const chart = req.query.chart;
+  const limit = req.query.limit || 40;
+
+  console.log(`[vers] repo=${repo} chart=${chart} limit=${limit}`);
+
+  if (!repo || !chart) {
+    return res.status(400).json({ error: 'repo/owner & chart required' });
+  }
 
   try {
     const { data } = await axios.get(
@@ -141,12 +156,18 @@ app.get('/api/versions', async (req, res) => {
     );
   } catch (e) {
     console.warn('[ArtHub] versions error:', e.message);
-    res.json([]);
+    res.status(500).json({ error: e.message });
   }
-});
+}
+
+/* ❷ – original path (kept for backward compatibility) */
+app.get('/api/versions', serveVersions);
+
+/* ❸ – new alias path that the React UI is calling */
+app.get('/api/chart/versions', serveVersions);
 
 /* ════════════════════════════════════════════════════════════════
-   5.  Proxy deploy / delete webhooks (unchanged)
+   5.  Proxy deploy / delete webhooks
    ═══════════════════════════════════════════════════════════════ */
 app.post('/api/sync',   async (r, s) => {
   try { await triggerWebhook(r.body.name,  r.body.namespace);   s.json({ ok:true }); }
