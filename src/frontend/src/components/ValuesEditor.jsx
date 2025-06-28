@@ -202,10 +202,11 @@ export default function ValuesEditor({ chart, onBack }) {
         : (preview?.delta || "").trim() || "# (no overrides)";
     const payload = {
       chart: chart.name,
-      repo: chart.repoURL, // ← always include Helm repo URL
+      repo: chart.repoURL,
       version: ver,
       release: rel,
       namespace: ns,
+      name: rel,
       userValuesYaml:
         downloadOnly || deltaStr === "# (no overrides)"
           ? ""
