@@ -19,7 +19,7 @@ function useFetch(url, deps, cb) {
     const ctrl = new AbortController();
     (async () => {
       try { cb(await fetchSmart(url, { signal: ctrl.signal })); }
-      catch {/* ignore – caller decides what to do */}
+      catch {/* ignore – caller decides what to do */ }
     })();
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -113,11 +113,60 @@ export default function ValuesEditor({ chart, onBack }) {
   /* ⑤ render ----------------------------------------------------------- */
   return (
     <>
+      {/* ─── back button ──────────────────────────────────────────────── */}
       <button className="btn-secondary btn-back" onClick={onBack}>
         ← Back
       </button>
-      <h2>{chart.displayName || chart.name}</h2>
 
+      {/* ─── sticky chart-info header ─────────────────────────────────── */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: "1rem",
+          marginBottom: "1.1rem",
+        }}
+      >
+        {chart.logo && (
+          <img
+            src={chart.logo}
+            alt=""
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 6,
+              objectFit: "contain",
+              background: "#fff",
+              flexShrink: 0,
+            }}
+          />
+        )}
+
+        <div style={{ minWidth: 0 }}>
+          <h2 style={{ margin: 0 }}>
+            {chart.displayName || chart.name}
+          </h2>
+          {chart.repoName && (
+            <p style={{ margin: ".1rem 0 0", fontSize: ".83rem", color: "var(--text-light)" }}>
+              {chart.repoName}{chart.latest ? ` · latest ${chart.latest}` : ""}
+            </p>
+          )}
+          {chart.description && (
+            <p
+              style={{
+                margin: ".45rem 0 0",
+                fontSize: ".9rem",
+                color: "var(--text-light)",
+                maxWidth: "60ch",
+              }}
+            >
+              {chart.description}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* ─── version selector ─────────────────────────────────────────── */}
       <label>Version</label>
       {versions.length ? (
         <select value={ver} onChange={(e) => setVer(e.target.value)}>
@@ -129,9 +178,15 @@ export default function ValuesEditor({ chart, onBack }) {
         <em>no versions found</em>
       )}
 
+      {/* ─── namespace input ──────────────────────────────────────────── */}
       <label style={{ marginTop: "1rem" }}>Namespace</label>
-      <input value={ns} onChange={(e) => setNs(e.target.value)} />
+      <input
+        value={ns}
+        onChange={(e) => setNs(e.target.value)}
+        style={{ width: "100%", padding: ".55rem .8rem", fontSize: ".95rem" }}
+      />
 
+      {/* ─── editor / spinner ─────────────────────────────────────────── */}
       {busy ? (
         <div className="editor-placeholder">
           <Spinner size={36} />
@@ -140,6 +195,7 @@ export default function ValuesEditor({ chart, onBack }) {
         <div ref={editorRef} className="editor-frame" />
       )}
 
+      {/* ─── submit button ────────────────────────────────────────────── */}
       <button className="btn" onClick={submit} disabled={busy || !ver}>
         {busy ? "Loading…" : "Install"}
       </button>
