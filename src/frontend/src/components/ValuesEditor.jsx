@@ -16,7 +16,6 @@ import Spinner from "./Spinner.jsx";
    Helpers
    ────────────────────────────────────────────────────────────── */
 
-/** fetch that auto-chooses .json() or .text() */
 async function fetchSmart(url, opts = {}) {
   const res = await fetch(url, opts);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -24,7 +23,6 @@ async function fetchSmart(url, opts = {}) {
   return ct.includes("json") ? res.json() : res.text();
 }
 
-/** effect wrapper that aborts the fetch if the component unmounts */
 function useFetch(url, deps, cb) {
   useEffect(() => {
     if (!url) return;
@@ -62,10 +60,7 @@ export default function ValuesEditor({ chart, onBack }) {
   useFetch(
     `/api/chart/versions?owner=${chart.repoName}&chart=${chart.name}`,
     [chart.repoName, chart.name],
-    (arr = []) => {
-      setVers(arr);
-      setVer(arr[0] || "");
-    },
+    (arr = []) => { setVers(arr); setVer(arr[0] || ""); },
   );
 
   /* ② fetch default values for selected version */
@@ -78,34 +73,21 @@ export default function ValuesEditor({ chart, onBack }) {
         const yml = await fetchSmart(
           `/api/chart/values?pkgId=${chart.packageId}&version=${ver}`,
         );
-        if (!done) {
-          setInit(yml);
-          ymlRef.current = yml;
-          setBusy(false);
-        }
+        if (!done) { setInit(yml); ymlRef.current = yml; setBusy(false); }
       } catch {
         if (!done) {
           const msg = "# (no default values found)";
-          setInit(msg);
-          ymlRef.current = msg;
-          setBusy(false);
+          setInit(msg); ymlRef.current = msg; setBusy(false);
         }
       }
     })();
     return () => { done = true; };
   }, [chart.packageId, ver]);
 
-  /* ③ create / recreate Monaco editor
-        – downloads disabled  OR  busy → no editor
-        – recreate when toggling fullScreen                       */
+  /* ③ create / recreate Monaco editor */
   useEffect(() => {
-    if (busy || downloadOnly) return;
-
-    if (!edDivRef.current) return;
-
-    // dispose any previous instance
-    edRef.current?.dispose();
-
+    if (busy || downloadOnly || !edDivRef.current) return;
+    edRef.current?.dispose();           // dispose previous
     edRef.current = monaco.editor.create(edDivRef.current, {
       value: ymlRef.current || initVals,
       language: "yaml",
@@ -115,57 +97,53 @@ export default function ValuesEditor({ chart, onBack }) {
     edRef.current.onDidChangeModelContent(() => {
       ymlRef.current = edRef.current.getValue();
     });
-
     return () => edRef.current?.dispose();
   }, [busy, downloadOnly, fullScreen, initVals]);
 
-  /* ④ escape key closes full-screen --------------------------- */
+  /* ④ Esc closes full-screen */
   useEffect(() => {
     if (!fullScreen) return;
-    const h = (e) => e.key === "Escape" && setFS(false);
+    const h = e => e.key === "Escape" && setFS(false);
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [fullScreen]);
 
-  /* ─── helpers ──────────────────────────────────────────────── */
+  /* ─── helpers ─────────────────────────────────────────────── */
   async function openPreview() {
     if (downloadOnly) return;
     setBusy(true);
     try {
       const delta = await fetchSmart("/api/delta", {
-        method: "POST",
+        method : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body   : JSON.stringify({
           defaultYaml: initVals,
-          userYaml: ymlRef.current,
+          userYaml   : ymlRef.current,
         }),
       });
       setPre({ delta });
     } catch (e) {
       console.error("Δ-preview error:", e);
       alert("Could not compute YAML delta – see console.");
-    } finally {
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
   }
 
   async function deploy() {
     setBusy(true);
-
-    const url = downloadOnly ? "/api/download" : "/api/apps";
-    let body;
+    const url  = downloadOnly ? "/api/download" : "/api/apps";
+    let   body;
 
     if (downloadOnly) {
       body = { chart: chart.name, repo: chart.repoURL, version: ver };
     } else {
       const deltaStr   = (preview?.delta || "").trim() || "# (no overrides)";
-      const encodedStr = btoa(deltaStr);               // base-64
+      const encodedStr = btoa(deltaStr);
 
       body = {
-        chart:   chart.name,
-        repo:    chart.repoURL,
-        version: ver,
-        release: appName,
+        name:     appName,        // <── NEW
+        chart:    chart.name,
+        version:  ver,
+        release:  appName,
         namespace: ns,
         userValuesYaml: encodedStr,
       };
@@ -173,15 +151,13 @@ export default function ValuesEditor({ chart, onBack }) {
 
     try {
       await fetch(url, {
-        method: "POST",
+        method : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body   : JSON.stringify(body),
       });
       alert(downloadOnly ? "Download triggered!" : "Install request sent!");
       onBack();
-    } finally {
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
   }
 
   /* ─── preview modal ───────────────────────────────────────── */
@@ -190,7 +166,7 @@ export default function ValuesEditor({ chart, onBack }) {
     useEffect(() => {
       if (!mRef.current) return;
       const e = monaco.editor.create(mRef.current, {
-        value: preview.delta || "# (no overrides)",
+        value   : preview.delta || "# (no overrides)",
         language: "yaml",
         readOnly: true,
         automaticLayout: true,
@@ -204,23 +180,11 @@ export default function ValuesEditor({ chart, onBack }) {
         <div
           className="modal-dialog"
           style={{ width: "64vw", maxWidth: 900 }}
-          onClick={(e) => e.stopPropagation()}
+          onClick={e => e.stopPropagation()}
         >
-          <button
-            className="modal-close"
-            onClick={() => setPre(null)}
-            aria-label="close"
-          >
-            ×
-          </button>
+          <button className="modal-close" onClick={() => setPre(null)} aria-label="close">×</button>
           <h2 style={{ margin: "0 0 .5rem" }}>Override values preview</h2>
-          <p
-            style={{
-              margin: "0 0 1rem",
-              fontSize: ".85rem",
-              color: "var(--text-light)",
-            }}
-          >
+          <p style={{ margin: "0 0 1rem", fontSize: ".85rem", color: "var(--text-light)" }}>
             Only the keys that differ from chart defaults will be saved.
           </p>
           <div
@@ -231,20 +195,8 @@ export default function ValuesEditor({ chart, onBack }) {
               borderRadius: 6,
             }}
           />
-          <div
-            style={{
-              display: "flex",
-              gap: "1rem",
-              justifyContent: "flex-end",
-              marginTop: "1.1rem",
-            }}
-          >
-            <button
-              className="btn-secondary"
-              onClick={() => setPre(null)}
-            >
-              Back
-            </button>
+          <div style={{ display: "flex", gap: "1rem", justifyContent: "flex-end", marginTop: "1.1rem" }}>
+            <button className="btn-secondary" onClick={() => setPre(null)}>Back</button>
             <button className="btn" onClick={deploy}>
               {busy ? "Saving…" : "Install ArgoCD Application"}
             </button>
@@ -257,53 +209,22 @@ export default function ValuesEditor({ chart, onBack }) {
   /* ─── header (logo + meta) ────────────────────────────────── */
   function ChartHeader() {
     return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          gap: "1rem",
-          marginBottom: "1.1rem",
-        }}
-      >
+      <div style={{ display: "flex", alignItems: "flex-start", gap: "1rem", marginBottom: "1.1rem" }}>
         {chart.logo && (
-          <img
-            src={chart.logo}
-            alt=""
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 6,
-              objectFit: "contain",
-              background: "#fff",
-              flexShrink: 0,
-            }}
-          />
+          <img src={chart.logo} alt=""
+               style={{ width:48, height:48, borderRadius:6, objectFit:"contain",
+                        background:"#fff", flexShrink:0 }} />
         )}
-        <div style={{ minWidth: 0 }}>
-          <h2 style={{ margin: 0 }}>
-            {chart.displayName || chart.name}
-          </h2>
+        <div style={{ minWidth:0 }}>
+          <h2 style={{ margin:0 }}>{chart.displayName || chart.name}</h2>
           {chart.repoName && (
-            <p
-              style={{
-                margin: ".1rem 0 0",
-                fontSize: ".83rem",
-                color: "var(--text-light)",
-              }}
-            >
-              {chart.repoName}
-              {chart.latest ? ` · latest ${chart.latest}` : ""}
+            <p style={{ margin:".1rem 0 0", fontSize:".83rem", color:"var(--text-light)" }}>
+              {chart.repoName}{chart.latest ? ` · latest ${chart.latest}` : ""}
             </p>
           )}
           {chart.description && (
-            <p
-              style={{
-                margin: ".45rem 0 0",
-                fontSize: ".9rem",
-                color: "var(--text-light)",
-                maxWidth: "60ch",
-              }}
-            >
+            <p style={{ margin:".45rem 0 0", fontSize:".9rem",
+                       color:"var(--text-light)", maxWidth:"60ch" }}>
               {chart.description}
             </p>
           )}
@@ -320,111 +241,74 @@ export default function ValuesEditor({ chart, onBack }) {
       {preview && !downloadOnly && <PreviewModal />}
 
       {fullScreen && showEditor && (
-        <div
-          className="modal-overlay"
-          onClick={() => setFS(false)}
-        >
+        <div className="modal-overlay" onClick={() => setFS(false)}>
           <div
             className="modal-dialog"
-            style={{ width: "95vw", height: "90vh", padding: "1rem" }}
-            onClick={(e) => e.stopPropagation()}
+            style={{ width:"95vw", height:"90vh", padding:"1rem" }}
+            onClick={e => e.stopPropagation()}
           >
-            <button
-              className="modal-close"
-              onClick={() => setFS(false)}
-              aria-label="close"
-            >
-              ×
-            </button>
+            <button className="modal-close" onClick={() => setFS(false)} aria-label="close">×</button>
             <div
               ref={edDivRef}
               style={{
-                height: "calc(100% - 16px)",
-                border: "1px solid var(--border)",
-                borderRadius: 6,
+                height:"calc(100% - 16px)",
+                border:"1px solid var(--border)",
+                borderRadius:6,
               }}
             />
           </div>
         </div>
       )}
 
-      <button className="btn-secondary btn-back" onClick={onBack}>
-        ← Back
-      </button>
+      <button className="btn-secondary btn-back" onClick={onBack}>← Back</button>
 
       <ChartHeader />
 
       {/* version selector */}
       <label>Version</label>
       {versions.length ? (
-        <select value={ver} onChange={(e) => setVer(e.target.value)}>
-          {versions.map((v) => (
-            <option key={v}>{v}</option>
-          ))}
+        <select value={ver} onChange={e => setVer(e.target.value)}>
+          {versions.map(v => <option key={v}>{v}</option>)}
         </select>
-      ) : (
-        <em>no versions found</em>
-      )}
+      ) : <em>no versions found</em>}
 
       {/* download-only checkbox */}
-      <label
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: ".55rem",
-          marginTop: "1rem",
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={downloadOnly}
-          onChange={(e) => setDL(e.target.checked)}
-        />
-        I want <strong>only to download</strong> this Helm chart (no
-        Application yet)
+      <label style={{ display:"flex", alignItems:"center", gap:".55rem", marginTop:"1rem" }}>
+        <input type="checkbox" checked={downloadOnly} onChange={e => setDL(e.target.checked)} />
+        I want <strong>only to download</strong> this Helm chart
       </label>
 
       {/* extra inputs + editor only for install path */}
       {showEditor && (
         <>
-          <label style={{ marginTop: "1rem" }}>Application&nbsp;name</label>
+          <label style={{ marginTop:"1rem" }}>Application&nbsp;name</label>
           <input
             value={appName}
-            onChange={(e) => setAppName(e.target.value)}
-            style={{
-              width: "100%",
-              padding: ".55rem .8rem",
-              fontSize: ".95rem",
-            }}
+            onChange={e => setAppName(e.target.value)}
+            style={{ width:"100%", padding:".55rem .8rem", fontSize:".95rem" }}
           />
 
-          <label style={{ marginTop: "1rem" }}>Namespace</label>
+          <label style={{ marginTop:"1rem" }}>Namespace</label>
           <input
             value={ns}
-            onChange={(e) => setNs(e.target.value)}
-            style={{
-              width: "100%",
-              padding: ".55rem .8rem",
-              fontSize: ".95rem",
-            }}
+            onChange={e => setNs(e.target.value)}
+            style={{ width:"100%", padding:".55rem .8rem", fontSize:".95rem" }}
           />
 
           {busy ? (
-            <div className="editor-placeholder">
-              <Spinner size={36} />
-            </div>
+            <div className="editor-placeholder"><Spinner size={36} /></div>
           ) : (
-            /* wrapper enables absolute-positioned maximise button */
-            <div style={{ position: "relative" }}>
+            <div style={{ position:"relative" }}>
               {!fullScreen && (
                 <button
                   className="btn-secondary"
                   style={{
-                    position: "absolute",
-                    top: 6,
-                    right: 6,
-                    padding: ".25rem .6rem",
-                    fontSize: ".8rem",
+                    position:"absolute",
+                    top:6,
+                    right:6,
+                    padding:".25rem .6rem",
+                    fontSize:".8rem",
+                    zIndex:1000,          /* <-- NOW GUARANTEED VISIBLE */
                   }}
                   onClick={() => setFS(true)}
                   title="Maximise editor"
@@ -443,6 +327,7 @@ export default function ValuesEditor({ chart, onBack }) {
         className="btn"
         onClick={downloadOnly ? deploy : openPreview}
         disabled={busy || !ver}
+        style={{ marginTop:"1.2rem" }}
       >
         {busy
           ? "Working…"
