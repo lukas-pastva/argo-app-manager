@@ -7,7 +7,7 @@ export default function AppsList({ file }) {
   const [sel,   setSel]   = useState(null);
   const [busy,  setBusy]  = useState(true);
 
-  /* fetch once per file ------------------------------------------ */
+  /* ── fetch once per YAML file ───────────────────────────────── */
   useEffect(() => {
     if (!file) return;
     setBusy(true);
@@ -16,14 +16,32 @@ export default function AppsList({ file }) {
       .then(list => { setFlat(list); setBusy(false); });
   }, [file]);
 
-  /* group by appProject ------------------------------------------ */
+  /* ── helper: derive chart + version from either style ───────── */
+  function derive(app) {
+    if (app.chart) {
+      return { chart: app.chart, version: app.targetRevision || "—" };
+    }
+    /* path style: external/<owner>/<CHART>/<VERSION> */
+    const seg = (app.path || "").split("/").filter(Boolean);
+    const version = seg.at(-1)  || "—";
+    const chart   = seg.at(-2)  || "—";
+    return { chart, version };
+  }
+
+  /* ── group by appProject for nicer layout ───────────────────── */
   const grouped = flat.reduce((m, it) => {
     (m[it.project] ??= []).push(it);
     return m;
   }, {});
 
-  /* render ------------------------------------------------------- */
-  if (busy) return <div style={{ padding:"2rem" }}><Spinner size={32} /></div>;
+  /* ── render ─────────────────────────────────────────────────── */
+  if (busy) {
+    return (
+      <div style={{ padding:"2rem", textAlign:"center" }}>
+        <Spinner size={40}/>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -32,24 +50,34 @@ export default function AppsList({ file }) {
           <h3>{project}</h3>
 
           <div className="apps-list">
-            {apps.map(({ app, file, meta }) => (
-              <div
-                key={project + "/" + app.name}
-                className="app-card"
-                onClick={() => setSel({ project, file, app })}
-              >
-                <span>📦</span>
-                <div style={{ minWidth:0 }}>
-                  <span
-                    className="name"
-                    style={{ whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}
-                  >
-                    {app.name}
-                  </span><br/>
-                  <small>{app.chart}:{meta.version || app.targetRevision}</small>
+            {apps.map(({ app, file }) => {
+              const { chart, version } = derive(app);
+              /* if we can’t identify a chart → no click-through */
+              const clickable = chart !== "—";
+
+              const card = (
+                <div
+                  className="app-card"
+                  key={project + "/" + app.name}
+                  {...(clickable && { onClick: () => setSel({ project, file, app }) })}
+                  style={{ cursor: clickable ? "pointer" : "default" }}
+                >
+                  <span>📦</span>
+                  <div style={{ minWidth:0 }}>
+                    <span
+                      className="name"
+                      style={{ whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}
+                    >
+                      {app.name}
+                    </span>
+                    <br/>
+                    <small>{chart}:{version}</small>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+
+              return card;
+            })}
           </div>
         </section>
       ))}
