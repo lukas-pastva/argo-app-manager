@@ -1,15 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
-import yaml         from "js-yaml";        //  <--  new
+import yaml         from "js-yaml";
 import Spinner      from "./Spinner.jsx";
-
-const AH_BASE = "https://artifacthub.io/api/v1";
 
 /* ------------------------------------------------------------------ */
 /* generic fetch helper that auto-chooses .json() or .text()          */
 async function fetchSmart(url, { signal } = {}) {
   const res = await fetch(url, { signal });
-  if (!res.ok)         throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const ct = res.headers.get("content-type") || "";
   return ct.includes("json") ? res.json() : res.text();
 }
@@ -17,11 +15,11 @@ async function fetchSmart(url, { signal } = {}) {
 /* small effect wrapper with abort-on-unmount                         */
 function useFetch(url, deps, cb) {
   useEffect(() => {
-    if (!url) return;                      // guard for first render
+    if (!url) return;
     const ctrl = new AbortController();
     (async () => {
       try { cb(await fetchSmart(url, { signal: ctrl.signal })); }
-      catch { /* ignore (404 etc.) – caller decides what to do */ }
+      catch {/* ignore – caller decides what to do */}
     })();
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -37,16 +35,15 @@ export default function ValuesEditor({ chart, onBack }) {
   const [busy,     setBusy] = useState(true);
   const editorRef  = useRef(null);
 
-  /* ① load version list ------------------------------------------------- */
+  /* ① load version list via backend proxy (no CORS!) ------------------- */
   useFetch(
-    `${AH_BASE}/packages/helm/${chart.repoName}/${chart.name}`,
+    `/api/chart/versions?owner=${chart.repoName}&chart=${chart.name}`,
     [chart.repoName, chart.name],
-    pkg => {
-      const v = pkg.available_versions.map(v => v.version);  // newest first
-      setVers(v);
-      setVer(v[0] || "");
+    (arr = []) => {
+      setVers(arr);
+      setVer(arr[0] || "");
       setBusy(false);
-    }
+    },
   );
 
   /* ② load default values every time the version changes --------------- */
@@ -56,22 +53,18 @@ export default function ValuesEditor({ chart, onBack }) {
     (async () => {
       setBusy(true);
 
-      /* first try the canonical /values endpoint ----------------------- */
+      /* try Artifact Hub’s /values endpoint – MAY fail on CORS ---------- */
       try {
         const yml = await fetchSmart(
-          `${AH_BASE}/packages/${chart.packageId}/${ver}/values`
+          `https://artifacthub.io/api/v1/packages/${chart.packageId}/${ver}/values`,
         );
-        if (!done) { setVals(yml); setBusy(false); }
-        return;
-      } catch (err) {
-        /* swallow only 404, otherwise bubble the error ---------------- */
-        if (!/404/.test(String(err))) { console.error(err); }
-      }
+        if (!done) { setVals(yml); setBusy(false); return; }
+      } catch {/* (ignore and fall back) */ }
 
-      /* fallback to /templates and stringify the returned object ------ */
+      /* fall back to /templates + stringify ----------------------------- */
       try {
         const tpl = await fetchSmart(
-          `${AH_BASE}/packages/${chart.packageId}/${ver}/templates`
+          `https://artifacthub.io/api/v1/packages/${chart.packageId}/${ver}/templates`,
         );
         const yml = yaml.dump(tpl.values || {}, { lineWidth: 0 });
         if (!done) { setVals(yml); setBusy(false); }
@@ -90,7 +83,7 @@ export default function ValuesEditor({ chart, onBack }) {
       value: vals,
       language: "yaml",
       automaticLayout: true,
-      minimap: { enabled: false }
+      minimap: { enabled: false },
     });
     ed.onDidChangeModelContent(() => setVals(ed.getValue()));
     return () => ed.dispose();
@@ -109,8 +102,8 @@ export default function ValuesEditor({ chart, onBack }) {
         version : ver,
         release : chart.name,
         namespace: ns,
-        userValuesYaml: vals
-      })
+        userValuesYaml: vals,
+      }),
     });
     setBusy(false);
     alert("Deploy sent!");
@@ -120,21 +113,29 @@ export default function ValuesEditor({ chart, onBack }) {
   /* ⑤ render ----------------------------------------------------------- */
   return (
     <>
-      <button className="btn-secondary btn-back" onClick={onBack}>← Back</button>
+      <button className="btn-secondary btn-back" onClick={onBack}>
+        ← Back
+      </button>
       <h2>{chart.displayName || chart.name}</h2>
 
       <label>Version</label>
       {versions.length ? (
-        <select value={ver} onChange={e => setVer(e.target.value)}>
-          {versions.map(v => <option key={v}>{v}</option>)}
+        <select value={ver} onChange={(e) => setVer(e.target.value)}>
+          {versions.map((v) => (
+            <option key={v}>{v}</option>
+          ))}
         </select>
-      ) : <em>no versions found</em>}
+      ) : (
+        <em>no versions found</em>
+      )}
 
       <label style={{ marginTop: "1rem" }}>Namespace</label>
-      <input value={ns} onChange={e => setNs(e.target.value)} />
+      <input value={ns} onChange={(e) => setNs(e.target.value)} />
 
       {busy ? (
-        <div className="editor-placeholder"><Spinner size={36} /></div>
+        <div className="editor-placeholder">
+          <Spinner size={36} />
+        </div>
       ) : (
         <div ref={editorRef} className="editor-frame" />
       )}

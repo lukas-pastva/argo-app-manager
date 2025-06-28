@@ -80,6 +80,10 @@ h3{margin:0 0 .8rem;font-size:1.1rem;color:var(--primary);}
              padding:.55rem .9rem;cursor:pointer;}
 .result-item:hover{background:#f1f4f7;}
 [data-theme='dark'] .result-item:hover{background:#242a30;}
+/* NEW → clamp logo size */
+.result-item img{
+  width:26px;height:26px;border-radius:4px;object-fit:contain;background:#fff;
+}
 
 /* ---------- PROJECT / APP GRID ---------- */
 .project-group{
@@ -154,7 +158,7 @@ select{
 body.modal-open{overflow:hidden;}
 
 /* ---------- SPINNER ---------- */
-/* @keyframes spin{to{transform:rotate(360deg);}}
+@keyframes spin{to{transform:rotate(360deg);}}
 .spinner{
   width:24px;
   height:24px;
@@ -163,4 +167,4 @@ body.modal-open{overflow:hidden;}
   border-radius:50%;
   animation:spin 1s linear infinite;
   margin:auto;
-} */
+}
