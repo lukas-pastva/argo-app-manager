@@ -5,17 +5,14 @@ export default function ChartSearch({ onSelect }) {
   const [res, setRes] = useState([]);
   const [load,setLoad]= useState(false);
 
-  async function search(t) {
-    setQ(t);
-    if (t.length < 4) { setRes([]); return; }   // 4-char guard
-
+  async function search(text) {
+    setQ(text);
+    if (text.length < 4) { setRes([]); return; }
     setLoad(true);
-    const r = await fetch(`/api/search?q=${encodeURIComponent(t)}`).then(r=>r.json());
-    /* dedupe by chart name, keep first hit */
-    const uniq = [];
+    const out = await fetch(`/api/search?q=${encodeURIComponent(text)}`).then(r=>r.json());
+    // remove duplicates by name – keep the first hit
     const seen = new Set();
-    r.forEach(p => { if (!seen.has(p.name)) { seen.add(p.name); uniq.push(p);} });
-    setRes(uniq);
+    setRes(out.filter(p=>!seen.has(p.name) && seen.add(p.name)));
     setLoad(false);
   }
 
@@ -24,22 +21,30 @@ export default function ChartSearch({ onSelect }) {
       <div className="search-box">
         <input
           className="search-input"
-          placeholder="Type chart name (≥4 chars)…"
+          placeholder="Type at least 4 characters…"
           value={q}
-          onChange={e => search(e.target.value)}
+          onChange={e=>search(e.target.value)}
         />
         {load && <span style={{ alignSelf:"center" }}>⏳</span>}
       </div>
 
-      {res.length > 0 && (
+      {res.length>0 && (
         <div className="results-list">
-          {res.map(c => (
-            <div
-              key={c.name}
-              className="result-item"
-              onClick={() => onSelect(c)}     /* only name + repo for now */
-            >
-              <strong>{c.displayName || c.name}</strong>
+          {res.map(p=>(
+            <div key={p.name} className="result-item" onClick={()=>onSelect(p)}>
+              {p.logo && <img src={p.logo} alt="" />}
+              <div style={{minWidth:0}}>
+                <strong>{p.displayName||p.name}</strong><br/>
+                <small>
+                  {p.repo?.replace(/^https?:\/\//,"") || "—"} · {p.version}
+                </small><br/>
+                {p.description && (
+                  <small style={{color:"var(--text-light)",display:"block",whiteSpace:"nowrap",
+                                 overflow:"hidden",textOverflow:"ellipsis"}}>
+                    {p.description}
+                  </small>
+                )}
+              </div>
             </div>
           ))}
         </div>

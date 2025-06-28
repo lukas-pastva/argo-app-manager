@@ -103,6 +103,11 @@ app.get("/api/app/values", async (req, res) => {
   try { overrideY = await fs.readFile(valuesRel, "utf8"); } catch {}
   try { defaultY  = await fs.readFile(chartFile, "utf8");   } catch {}
 
+  /* DEBUG ─────────────── */
+  console.log("[vals] project=%s  app=%s", project, name);
+  console.log("[vals] override →", valuesRel,  overrideY ? "✔︎" : "✖︎");
+  console.log("[vals] default  →", chartFile, defaultY  ? "✔︎" : "✖︎");
+
   res.json({ defaultValues: defaultY, overrideValues: overrideY });
 });
 

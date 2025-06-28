@@ -4,7 +4,7 @@
       • chart default values
       • override values
       • (optional) chart meta-info – description, home, maintainers
-         – **handled defensively now** so it works even if meta is missing
+        (handled defensively in case meta is missing)
 */
 
 import React, { useEffect, useRef, useState } from "react";
@@ -13,11 +13,10 @@ import Spinner from "./Spinner.jsx";
 
 export default function AppDetails({ project, file, app, onClose }) {
   /* ─── state ────────────────────────────────────────────────── */
-  const [vals, setVals]   = useState({
-    defaultValues : "",
+  const [vals, setVals] = useState({
+    defaultValues: "",
     overrideValues: "",
-    /* meta might be absent – initialise to empty object */
-    meta: {}
+    meta: {}, // might be absent
   });
   const [loading, setLoading] = useState(true);
 
@@ -25,22 +24,39 @@ export default function AppDetails({ project, file, app, onClose }) {
   const defRef = useRef(null);
   const ovrRef = useRef(null);
 
+  /* ─── lock body scroll while modal is open ─────────────────── */
+  useEffect(() => {
+    document.body.classList.add("modal-open");
+    return () => document.body.classList.remove("modal-open");
+  }, []);
+
   /* ─── fetch values once -------------------------------------- */
   useEffect(() => {
-    const { name, chart, targetRevision: version, repoURL, path: chartPath } =
-      app;
+    const {
+      name,
+      chart,
+      targetRevision: version,
+      repoURL,
+      path: chartPath,
+    } = app;
+
     const qs = new URLSearchParams({
-      project, name, chart, version, repoURL, path: chartPath, file
+      project,
+      name,
+      chart,
+      version,
+      repoURL,
+      path: chartPath,
+      file,
     });
 
     fetch(`/api/app/values?${qs.toString()}`)
-      .then(r => r.json())
-      .then(json => {
-        /* always ensure meta is at least an empty object */
+      .then((r) => r.json())
+      .then((json) => {
         setVals({
-          defaultValues : json.defaultValues  || "",
+          defaultValues: json.defaultValues || "",
           overrideValues: json.overrideValues || "",
-          meta          : json.meta           || {}
+          meta: json.meta || {},
         });
         setLoading(false);
       })
@@ -55,19 +71,22 @@ export default function AppDetails({ project, file, app, onClose }) {
       language: "yaml",
       readOnly: true,
       automaticLayout: true,
-      minimap: { enabled: false }
+      minimap: { enabled: false },
     };
 
     const ed1 = monaco.editor.create(defRef.current, {
       value: vals.defaultValues || "# (no values.yaml found)",
-      ...common
+      ...common,
     });
     const ed2 = monaco.editor.create(ovrRef.current, {
       value: vals.overrideValues || "# (no override file)",
-      ...common
+      ...common,
     });
 
-    return () => { ed1.dispose(); ed2.dispose(); };
+    return () => {
+      ed1.dispose();
+      ed2.dispose();
+    };
   }, [loading, vals]);
 
   /* ─── tiny component for optional meta block ----------------- */
@@ -83,10 +102,11 @@ export default function AppDetails({ project, file, app, onClose }) {
           padding: "0.9rem 1rem",
           margin: "1rem 0",
           background: "var(--card-bg)",
-          color: "var(--text-light)"
+          color: "var(--text-light)",
         }}
       >
         {description && <p style={{ margin: 0 }}>{description}</p>}
+
         {(home || maintainers.length) && (
           <p style={{ margin: ".6rem 0 0", fontSize: ".85rem" }}>
             {home && (
@@ -109,15 +129,21 @@ export default function AppDetails({ project, file, app, onClose }) {
     );
   }
 
+  /* ─── unified close helper ─────────────────────────────────── */
+  const close = () => {
+    document.body.classList.remove("modal-open");
+    onClose();
+  };
+
   /* ─── render ───────────────────────────────────────────────── */
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={close}>
       <div
         className="modal-dialog"
         style={{ width: "90vw", maxWidth: 1280 }}
-        onClick={e => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
       >
-        <button className="modal-close" onClick={onClose} aria-label="close">
+        <button className="modal-close" onClick={close} aria-label="close">
           ×
         </button>
 
@@ -148,7 +174,7 @@ export default function AppDetails({ project, file, app, onClose }) {
               style={{
                 display: "grid",
                 gridTemplateColumns: "1fr 1fr",
-                gap: "1rem"
+                gap: "1rem",
               }}
             >
               <div>
@@ -158,7 +184,7 @@ export default function AppDetails({ project, file, app, onClose }) {
                   style={{
                     height: "48vh",
                     border: "1px solid var(--border)",
-                    borderRadius: 6
+                    borderRadius: 6,
                   }}
                 />
               </div>
@@ -170,7 +196,7 @@ export default function AppDetails({ project, file, app, onClose }) {
                   style={{
                     height: "48vh",
                     border: "1px solid var(--border)",
-                    borderRadius: 6
+                    borderRadius: 6,
                   }}
                 />
               </div>
