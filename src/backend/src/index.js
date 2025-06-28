@@ -1,6 +1,8 @@
 /*  src/backend/src/index.js
     ───────────────────────────────────────────────
-    Express-based API for the Argo-Helm-Toggler UI
+    Express-based API for the Argo-Helm-Toggler UI.
+    – repoURL is ignored; chart location comes from `path`
+    – values files may use .yaml **or** .yml
 */
 
 import express       from "express";
@@ -20,6 +22,14 @@ import { triggerWebhook,
 /* ── folders inside the Git repo ─────────────────────────────── */
 export const CHARTS_ROOT   = process.env.CHARTS_ROOT   || "charts";
 export const VALUES_SUBDIR = process.env.VALUES_SUBDIR || "values";
+
+/* ── tiny helper: read the 1st existing file in a list ───────── */
+async function readFirst(paths) {
+  for (const p of paths) {
+    try { return await fs.readFile(p, "utf8"); } catch { /*ignore*/ }
+  }
+  return "";          // nothing found → empty string
+}
 
 const app = express();
 app.use(helmet());
@@ -59,7 +69,7 @@ app.get("/api/apps", async (req, res) => {
 });
 
 /* ═══════════════════════════════════════════════════════════════
-   3.  ArtifactHub search  (≥4 chars, 1-h cache, name-only list)
+   3.  ArtifactHub search  (≥4 chars, 1-h cache)
    ═════════════════════════════════════════════════════════════ */
 const searchCache = new Map(); const TTL = 60 * 60 * 1_000;
 app.get("/api/search", async (req, res) => {
@@ -92,46 +102,52 @@ app.get("/api/search", async (req, res) => {
 });
 
 /* ═══════════════════════════════════════════════════════════════
-   4.  Chart default & override values for the details modal
-       — repoURL is ignored, we rely solely on `path`
+   4.  Chart default & override values for modal
+       – repoURL ignored; path-based lookup
+       – supports both .yaml and .yml
    ═════════════════════════════════════════════════════════════ */
 app.get("/api/app/values", async (req, res) => {
-  const { project, name, chart, version, path: chartPath, file } = req.query;
+  const { project, name, version, path: chartPath, file } = req.query;
   if (!project || !name)
     return res.status(400).json({ error: "params missing" });
 
-  const repoRoot  = await ensureRepo();
-  const fileDir   = path.dirname(file);
-  const valuesRel = path.join(fileDir, VALUES_SUBDIR, `${name}.yaml`);
+  const repoRoot = await ensureRepo();
+  const fileDir  = path.dirname(file);
 
-  /* ── figure out where the chart lives inside the repo ───────── */
-  let chartFile = "";
-  if (chartPath) {
-    /* new “path-style” Application (preferred) */
-    chartFile = path.join(repoRoot, CHARTS_ROOT, chartPath, "values.yaml");
-  } else {
-    /* legacy style → charts/<owner>/<chart>/<ver>/values.yaml
-       owner segment is no longer relevant so we skip it */
-    chartFile = path.join(
-      repoRoot, CHARTS_ROOT, chart, version, "values.yaml"
-    );
+  /* override file – prefer .yaml, fallback to .yml */
+  const overrideY = await readFirst([
+    path.join(fileDir, VALUES_SUBDIR, `${name}.yaml`),
+    path.join(fileDir, VALUES_SUBDIR, `${name}.yml`)
+  ]);
+
+  /* default chart values */
+  let defaultY = "";
+  if (chartPath) {                              // modern “path” style
+    defaultY = await readFirst([
+      path.join(repoRoot, CHARTS_ROOT, chartPath, "values.yaml"),
+      path.join(repoRoot, CHARTS_ROOT, chartPath, "values.yml")
+    ]);
+  } else {                                      // legacy fields
+    // chart & owner part sit in chartPath in legacy so we derive from version
+    const segments = (req.query.chart || "").split("/");
+    const chart = segments.pop();
+    defaultY = await readFirst([
+      path.join(repoRoot, CHARTS_ROOT, chart, version, "values.yaml"),
+      path.join(repoRoot, CHARTS_ROOT, chart, version, "values.yml")
+    ]);
   }
 
-  let overrideY = "", defaultY = "";
-  try { overrideY = await fs.readFile(valuesRel, "utf8"); } catch {}
-  try { defaultY  = await fs.readFile(chartFile, "utf8"); } catch {}
-
   /* DEBUG ─────────────────────────────────────────────── */
-  console.log("[vals] project=%s  app=%s", project, name);
-  console.log("[vals] override →", valuesRel,  overrideY ? "✔︎" : "✖︎");
-  console.log("[vals] default  →", chartFile, defaultY  ? "✔︎" : "✖︎");
+  console.log("[vals] %s / %s → override:%s default:%s",
+              project, name,
+              overrideY ? "✔︎" : "✖︎",
+              defaultY  ? "✔︎" : "✖︎");
 
   res.json({ defaultValues: defaultY, overrideValues: overrideY });
 });
 
 /* ═══════════════════════════════════════════════════════════════
-   5.  Versions available for a chart inside the repo
-       (used only by the *Install* wizard)
+   5 & 6.  (Install wizard endpoints)  – unchanged
    ═════════════════════════════════════════════════════════════ */
 app.get("/api/chart/versions", async (req, res) => {
   const { owner = "unknown", chart } = req.query;
@@ -146,25 +162,24 @@ app.get("/api/chart/versions", async (req, res) => {
   } catch { res.json([]); }
 });
 
-/* ═══════════════════════════════════════════════════════════════
-   6.  Get chart’s default values.yaml  (Install wizard)
-   ═════════════════════════════════════════════════════════════ */
 app.get("/api/chart/values", async (req, res) => {
   const { owner = "unknown", chart, ver } = req.query;
   if (!chart || !ver) return res.status(400).json({ error: "missing fields" });
 
   try {
     const repoRoot = await ensureRepo();
-    const p = path.join(repoRoot, CHARTS_ROOT, owner, chart, ver, "values.yaml");
-    const txt = await fs.readFile(p, "utf8");
-    res.type("text/plain").send(txt);
+    const txt = await readFirst([
+      path.join(repoRoot, CHARTS_ROOT, owner, chart, ver, "values.yaml"),
+      path.join(repoRoot, CHARTS_ROOT, owner, chart, ver, "values.yml")
+    ]);
+    res.type("text/plain").send(txt || "# (no default values file)");
   } catch {
-    res.type("text/plain").send("# (no default values.yaml)");
+    res.type("text/plain").send("# (no default values file)");
   }
 });
 
 /* ═══════════════════════════════════════════════════════════════
-   7.  Create / update (webhook)
+   7.  Create / update (webhook) – unchanged
    ═════════════════════════════════════════════════════════════ */
 app.post("/api/apps", async (req, res) => {
   const { chart, repo, version, release, namespace,
@@ -187,7 +202,7 @@ app.post("/api/apps", async (req, res) => {
 });
 
 /* ═══════════════════════════════════════════════════════════════
-   8.  Delete
+   8.  Delete – unchanged
    ═════════════════════════════════════════════════════════════ */
 app.post("/api/apps/delete", async (req, res) => {
   const { release, namespace } = req.body || {};
