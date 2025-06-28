@@ -91,7 +91,7 @@ app.get('/api/app/values', async (req, res) => {
   const overrideFile = path.join(
     path.dirname(yamlFile),
     VALUES_SUBDIR,
-    `${name}.yaml`,
+    `${name}.yml`,          //  ← switched to .yml
   );
   const chartDir = path.join(gitRoot, CHARTS_ROOT, chartPath);
 

@@ -44,7 +44,7 @@ else
 fi
 
 values_dir="$(dirname "$apps_file")/$VALUES_SUBDIR"
-values_file="$values_dir/${release}.yaml"
+values_file="$values_dir/${release}.yml"      # ← switched to .yml
 mkdir -p "$values_dir"
 echo "$values" > "$values_file"
 echo "📝  Wrote values → $values_file"
@@ -66,7 +66,7 @@ spec:
     targetRevision: ${version}
     helm:
       valueFiles:
-        - ${VALUES_SUBDIR}/${release}.yaml
+        - ${VALUES_SUBDIR}/${release}.yml      # ← switched to .yml
 EOF
 )
 
@@ -76,8 +76,8 @@ if yq 'select(.kind=="Application") | .metadata.name' "$apps_file" \
 then
   echo "🔄  Updating existing Application in app-of-apps file"
   yq -i '
-    (.[] | select(.kind=="Application" and .metadata.name=="'$release'")
-    ).spec = load("'"$app_yaml"'" ) .spec
+    (.[] | select(.kind=="Application" and .metadata.name=="'"$release"'")
+    ).spec = load("'"$app_yaml"'") .spec
   ' "$apps_file"
 else
   echo "➕  Appending new Application to file"
