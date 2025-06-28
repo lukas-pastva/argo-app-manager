@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 #───────────────────────────────────────────────────────────────────────────────
 #  handle-helm-deploy.sh
-#  Process JSON from Helm-Toggler, update GitOps repo and push the change.
+#  Process JSON from Helm-Toggler and commit the change to Git.
 #
-#  Requirements:  jq  yq(v4)  helm  git
+#  Requirements:  jq  yq(v4)  git
 #───────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 # ════════════════ CONFIGURE ═══════════════════════════════════════════════════
-APPS_DIR="${APPS_DIR:-clusters}"             # 📂 override with env APPS_DIR
-VALUES_SUBDIR="${VALUES_SUBDIR:-values}"     # 📂 override with env VALUES_SUBDIR
+APPS_DIR="${APPS_DIR:-clusters}"             # 📂 override w/ env var
+VALUES_SUBDIR="${VALUES_SUBDIR:-values}"     # 📂 where <release>.yml live
 APP_FILE_PATTERN="${APP_FILE_GLOB:-app-of-apps*.y?(a)ml}"
-CHARTS_ROOT="charts/external"                # 📂 extracted chart storage root
+CHARTS_ROOT="charts/external"                # 📂 vendored charts root
 
 PUSH_BRANCH="${PUSH_BRANCH:-main}"           # main | <branch> | new
 COMMIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-helm-toggler}"
@@ -19,19 +19,21 @@ COMMIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-helm-toggler@local}"
 
 # ════════════════ READ PAYLOAD ════════════════════════════════════════════════
 json="$(cat)"
-j() { echo "$json" | jq -r "$1"; }
+j() { echo "$json" | jq -r "$1 // empty"; }
 
-chart=$(j .chart)
-repo=$(j .repo)
+name=$(j .name)                     # Application / release name
+chart=$(j .chart)                   # chart (no owner prefix)
 version=$(j .version)
-release=$(j .release)
 namespace=$(j .namespace)
-values=$(j .values_yaml)
+values_b64=$(j .userValuesYaml)     # base-64 encoded overrides
 
-[[ -z $chart || -z $repo || -z $release || -z $namespace ]] && {
+[[ -z $chart || -z $version || -z $namespace || -z $values_b64 ]] && {
   echo "❌  Missing required fields in webhook" >&2; exit 1; }
 
-echo "🚀  Deploy request: $release → $namespace  •  $chart@$version"
+release="${name:-$chart}"           # fallback if ‘name’ is omitted
+values="$(echo "$values_b64" | base64 --decode)"
+
+echo "🚀  Request: $release → $namespace  •  $chart@$version"
 
 # ════════════════ 1) locate / create app-of-apps file ════════════════════════
 apps_file=$(find "$APPS_DIR" -type f -name "$APP_FILE_PATTERN" | head -n1)
@@ -43,14 +45,19 @@ else
   echo "📄  Using app-of-apps file: $apps_file"
 fi
 
+# ════════════════ 2) write values file ═══════════════════════════════════════
 values_dir="$(dirname "$apps_file")/$VALUES_SUBDIR"
-values_file="$values_dir/${release}.yml"      # ← switched to .yml
+values_file="$values_dir/${release}.yml"
 mkdir -p "$values_dir"
 echo "$values" > "$values_file"
 echo "📝  Wrote values → $values_file"
 
-# ════════════════ 2) build Application YAML ══════════════════════════════════
-app_yaml=$(cat <<EOF
+# ════════════════ 3) build Application YAML ══════════════════════════════════
+git_url=$(git remote get-url origin |
+          sed -e 's#git@github.com:#https://github.com/#' \
+              -e 's#\.git$##')
+
+read -r -d '' app_yaml <<EOF
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -61,51 +68,40 @@ spec:
     server: https://kubernetes.default.svc
     namespace: ${namespace}
   source:
-    repoURL: ${repo}
-    chart: ${chart}
-    targetRevision: ${version}
+    repoURL: ${git_url}
+    path: ${CHARTS_ROOT}/${chart}/${version}
+    targetRevision: ${PUSH_BRANCH}
     helm:
       valueFiles:
-        - ${VALUES_SUBDIR}/${release}.yml      # ← switched to .yml
+        - ../../${VALUES_SUBDIR}/${release}.yml
 EOF
-)
 
-# ════════════════ 3) insert / update in YAML ═════════════════════════════════
+# ════════════════ 4) insert / update in YAML ═════════════════════════════════
 if yq 'select(.kind=="Application") | .metadata.name' "$apps_file" \
-     | grep -qx "$release"
-then
+     | grep -qx "$release"; then
   echo "🔄  Updating existing Application in app-of-apps file"
   yq -i '
     (.[] | select(.kind=="Application" and .metadata.name=="'"$release"'")
-    ).spec = load("'"$app_yaml"'") .spec
+    ) = load("'"$app_yaml"'")
   ' "$apps_file"
 else
-  echo "➕  Appending new Application to file"
+  echo "➕  Appending new Application"
   printf '%s\n---\n' "$app_yaml" >> "$apps_file"
 fi
 
-# ════════════════ 4) download chart ══════════════════════════════════════════
-owner=$(echo "$repo" | sed -E 's#.+/([^/]+)/?$#\1#')
-target_dir="${CHARTS_ROOT}/${owner}/${chart}/${version}"
+# ════════════════ 5) git add / commit / push ═════════════════════════════════
+git add "$apps_file" "$values_file"
 
-if [[ -d $target_dir ]]; then
-  echo "📦  Chart already present → $target_dir"
+chart_dir="${CHARTS_ROOT}/${chart}/${version}"
+if [[ -d $chart_dir ]]; then
+  git add "$chart_dir"
+  echo "📦  Added existing chart dir $chart_dir"
 else
-  echo "⬇️   Pulling chart into $target_dir"
-  tmp=$(mktemp -d)
-  helm pull "$repo/$chart" --version "$version" -d "$tmp" >/dev/null
-  tar xzf "$tmp/${chart}-${version}.tgz" -C "$tmp"
-  mkdir -p "$target_dir"
-  mv "$tmp/$chart"/* "$target_dir/"
-  rm -rf "$tmp"
-  echo "✅  Chart extracted"
+  echo "⚠️   Chart dir $chart_dir not found – skipped"
 fi
 
-# ════════════════ 5) git add / commit / push ═════════════════════════════════
-git add "$apps_file" "$values_file" "$target_dir"
-
 if git diff --cached --quiet; then
-  echo "💡  No git changes detected — nothing to push."
+  echo "💡  No git changes detected – exiting."
   exit 0
 fi
 
@@ -116,7 +112,7 @@ if [[ $PUSH_BRANCH == "new" ]]; then
   new_branch="helm-${release}-$(date +%Y%m%d%H%M%S)"
   git checkout -b "$new_branch"
   branch_to_push="$new_branch"
-  echo "🌱  Created new branch $branch_to_push"
+  echo "🌱  Created branch $branch_to_push"
 else
   git checkout "$PUSH_BRANCH"
   branch_to_push="$PUSH_BRANCH"
@@ -127,4 +123,4 @@ git commit -m "feat: add/update ${release} (${namespace}) chart ${chart} ${versi
 echo "📤  Pushing to origin/$branch_to_push"
 git push -u origin "$branch_to_push"
 
-echo "🎉  All done!"
+echo "🎉  Done!"
