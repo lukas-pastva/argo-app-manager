@@ -9,10 +9,13 @@ export default {
   /* override with APPS_GLOB – e.g. "my-cluster*.yaml" */
   appsGlob:  process.env.APPS_GLOB || "app-of-apps*.y?(a)ml",
 
-  webhookUrl:       process.env.WF_WEBHOOK_URL,
-  deleteWebhookUrl: process.env.WF_DELETE_WEBHOOK_URL ||
-                    (process.env.WF_WEBHOOK_URL ? process.env.WF_WEBHOOK_URL + "/delete" : ""),
-  webhookTok:       process.env.WF_TOKEN || "",
+  webhookUrl:        process.env.WF_WEBHOOK_URL,
+  deleteWebhookUrl:  process.env.WF_DELETE_WEBHOOK_URL ||
+                     (process.env.WF_WEBHOOK_URL ? process.env.WF_WEBHOOK_URL + "/action-delete"  : ""),
+  upgradeWebhookUrl: process.env.WF_UPGRADE_WEBHOOK_URL ||
+                     (process.env.WF_WEBHOOK_URL ? process.env.WF_WEBHOOK_URL + "/action-upgrade" : ""),
+
+  webhookTok: process.env.WF_TOKEN || "",
 
   chartCacheDir: "/tmp/chart-cache",
   port: Number(process.env.PORT) || 8080

@@ -1,8 +1,8 @@
 /*  AppDetails.jsx
-    ───────────────────────────────────────────────
+    ───────────────────────────────────────────────────────────────
     Modal that shows
-      • chart default values
-      • override values
+      • chart default values (read-only, never editable)
+      • override values   (view → edit → preview → save/upgrade)
       • optional meta (description / home / maintainers)
 */
 
@@ -10,8 +10,7 @@ import React, { useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
 import Spinner from "./Spinner.jsx";
 
-/* helper ────────────────────────────────────────────
-   returns { chart, version } for *either* source style */
+/* helper – returns { chart, version } for either source style */
 function chartInfo(app) {
   if (app.chart) {
     return { chart: app.chart, version: app.targetRevision || "" };
@@ -20,26 +19,33 @@ function chartInfo(app) {
   return { chart: seg.at(-2) || "", version: seg.at(-1) || "" };
 }
 
+/*──────────────────────────────────────────────────────────────────*/
+
 export default function AppDetails({ project, file, app, onClose }) {
-  /* ── state ─────────────────────────────────────────────── */
+  /* state ------------------------------------------------------- */
   const [vals, setVals] = useState({
     defaultValues: "",
     overrideValues: "",
-    meta: {},               // may be absent
+    meta: {},
   });
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]     = useState(true);
+  const [editing, setEditing]     = useState(false);
+  const [preview, setPreview]     = useState(null);        // { delta } | null
+  const [busy, setBusy]           = useState(false);
 
-  /* ── refs for the two read-only editors ─────────────────── */
-  const defRef = useRef(null);
-  const ovrRef = useRef(null);
+  /* refs -------------------------------------------------------- */
+  const defDivRef  = useRef(null);           // left-side viewer
+  const ovrDivRef  = useRef(null);           // right-side view / editor
+  const ovrEdRef   = useRef(null);           // Monaco instance (override)
+  const yamlRef    = useRef("");             // live override YAML text
 
-  /* ── lock body scroll while modal open ──────────────────── */
+  /* lock body scroll while modal open -------------------------- */
   useEffect(() => {
     document.body.classList.add("modal-open");
     return () => document.body.classList.remove("modal-open");
   }, []);
 
-  /* ── fetch chart + values once ──────────────────────────── */
+  /* fetch values once ------------------------------------------ */
   useEffect(() => {
     const { chart, version } = chartInfo(app);
     const qs = new URLSearchParams({
@@ -53,45 +59,185 @@ export default function AppDetails({ project, file, app, onClose }) {
     });
 
     fetch(`/api/app/values?${qs.toString()}`)
-      .then((r) => r.json())
-      .then((j) => {
+      .then(r => r.json())
+      .then(j => {
         setVals({
           defaultValues : j.defaultValues  || "",
           overrideValues: j.overrideValues || "",
           meta          : j.meta           || {},
         });
+        yamlRef.current = j.overrideValues || "";
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, [project, file, app]);
 
-  /* ── mount Monaco viewers when data ready ───────────────── */
+  /* mount left-hand (default) viewer once data ready ------------ */
   useEffect(() => {
-    if (loading || !defRef.current) return;
-
-    const common = {
+    if (loading || !defDivRef.current) return;
+    const e = monaco.editor.create(defDivRef.current, {
+      value: vals.defaultValues || "# (no values.yaml found)",
       language: "yaml",
       readOnly: true,
       automaticLayout: true,
       minimap: { enabled: false },
-    };
-
-    const e1 = monaco.editor.create(defRef.current, {
-      value: vals.defaultValues || "# (no values.yaml found)",
-      ...common,
     });
-    const e2 = monaco.editor.create(ovrRef.current, {
-      value: vals.overrideValues || "# (no override file)",
-      ...common,
+    return () => e.dispose();
+  }, [loading, vals.defaultValues]);
+
+  /* mount / remount right-hand viewer or editable editor -------- */
+  useEffect(() => {
+    if (loading || !ovrDivRef.current) return;
+
+    // dispose any previous instance first
+    ovrEdRef.current?.dispose();
+
+    ovrEdRef.current = monaco.editor.create(ovrDivRef.current, {
+      value: yamlRef.current || "# (no override file)",
+      language: "yaml",
+      readOnly: !editing,
+      automaticLayout: true,
+      minimap: { enabled: false },
     });
 
-    return () => {
-      e1.dispose();
-      e2.dispose();
-    };
-  }, [loading, vals]);
+    if (editing) {
+      ovrEdRef.current.onDidChangeModelContent(() => {
+        yamlRef.current = ovrEdRef.current.getValue();
+      });
+    }
 
-  /* ── tiny component for optional meta box ───────────────── */
+    return () => ovrEdRef.current?.dispose();
+  }, [loading, editing, vals.overrideValues]);
+
+  /* helper – YAML delta preview -------------------------------- */
+  async function openPreview() {
+    setBusy(true);
+    try {
+      const delta = await fetch("/api/delta", {
+        method : "POST",
+        headers: { "Content-Type": "application/json" },
+        body   : JSON.stringify({
+          defaultYaml: vals.defaultValues,
+          userYaml   : yamlRef.current,
+        }),
+      }).then(r => r.text());
+      setPreview({ delta });
+    } catch (e) {
+      console.error("Δ-preview error:", e);
+      alert("Could not compute YAML delta – see console.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /* helper – perform helm upgrade via backend ------------------ */
+  async function saveUpgrade() {
+    setBusy(true);
+    const { chart, version } = chartInfo(app);
+    const ns =
+      app.destinationNamespace ||
+      app.namespace ||
+      "default";
+
+    try {
+      await fetch("/api/upgrade", {
+        method : "POST",
+        headers: { "Content-Type": "application/json" },
+        body   : JSON.stringify({
+          chart,
+          repo     : app.repoURL,
+          version,
+          release  : app.name,
+          namespace: ns,
+          userValuesYaml: yamlRef.current,
+        }),
+      }).then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      });
+
+      alert("Upgrade triggered!");
+      setEditing(false);
+      setPreview(null);
+    } catch (e) {
+      console.error("upgrade error:", e);
+      alert(`Upgrade failed – ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /* preview modal ---------------------------------------------- */
+  function PreviewModal() {
+    const mRef = useRef(null);
+
+    useEffect(() => {
+      if (!mRef.current) return;
+      const e = monaco.editor.create(mRef.current, {
+        value   : preview.delta || "# (no changes)",
+        language: "yaml",
+        readOnly: true,
+        automaticLayout: true,
+        minimap: { enabled: false },
+      });
+      return () => e.dispose();
+    }, []);
+
+    return (
+      <div className="modal-overlay" onClick={() => setPreview(null)}>
+        <div
+          className="modal-dialog"
+          style={{ width: "64vw", maxWidth: 900 }}
+          onClick={e => e.stopPropagation()}
+        >
+          <button
+            className="modal-close"
+            onClick={() => setPreview(null)}
+            aria-label="close"
+          >
+            ×
+          </button>
+          <h2 style={{ margin: "0 0 .5rem" }}>Override values preview</h2>
+          <p
+            style={{
+              margin: "0 0 1rem",
+              fontSize: ".85rem",
+              color: "var(--text-light)",
+            }}
+          >
+            Only the keys that differ from chart defaults will be applied.
+          </p>
+          <div
+            ref={mRef}
+            style={{
+              height: "50vh",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+            }}
+          />
+          <div
+            style={{
+              display: "flex",
+              gap: "1rem",
+              justifyContent: "flex-end",
+              marginTop: "1.1rem",
+            }}
+          >
+            <button
+              className="btn-secondary"
+              onClick={() => setPreview(null)}
+            >
+              Back
+            </button>
+            <button className="btn" onClick={saveUpgrade} disabled={busy}>
+              {busy ? "Saving…" : "Save & upgrade"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* tiny component for optional meta box ----------------------- */
   function Meta() {
     const { description = "", home = "", maintainers = [] } = vals.meta ?? {};
     if (!description && !home && maintainers.length === 0) return null;
@@ -130,21 +276,23 @@ export default function AppDetails({ project, file, app, onClose }) {
     );
   }
 
-  /* ── unified close helper ───────────────────────────────── */
+  /* close helper ----------------------------------------------- */
   const close = () => {
     document.body.classList.remove("modal-open");
     onClose();
   };
 
-  /* ── render ─────────────────────────────────────────────── */
+  /* render ------------------------------------------------------ */
   const { chart, version } = chartInfo(app);
 
   return (
     <div className="modal-overlay" onClick={close}>
+      {preview && <PreviewModal />}
+
       <div
         className="modal-dialog"
         style={{ width: "90vw", maxWidth: 1280 }}
-        onClick={(e) => e.stopPropagation()}
+        onClick={e => e.stopPropagation()}
       >
         <button className="modal-close" onClick={close} aria-label="close">
           ×
@@ -180,10 +328,21 @@ export default function AppDetails({ project, file, app, onClose }) {
                 gap: "1rem",
               }}
             >
+              {/* chart defaults (always read-only) */}
               <div>
                 <h3 style={{ margin: "0 0 .4rem" }}>Chart defaults</h3>
+                <p
+                  style={{
+                    margin: "0 0 .4rem",
+                    fontSize: ".8rem",
+                    color: "var(--text-light)",
+                  }}
+                >
+                  This column is static – defaults come directly from the Helm
+                  chart and <strong>cannot</strong> be edited.
+                </p>
                 <div
-                  ref={defRef}
+                  ref={defDivRef}
                   style={{
                     height: "48vh",
                     border: "1px solid var(--border)",
@@ -192,16 +351,77 @@ export default function AppDetails({ project, file, app, onClose }) {
                 />
               </div>
 
+              {/* override values (view / edit) */}
               <div>
                 <h3 style={{ margin: "0 0 .4rem" }}>Override values</h3>
+                {!editing && (
+                  <p
+                    style={{
+                      margin: "0 0 .4rem",
+                      fontSize: ".8rem",
+                      color: "var(--text-light)",
+                    }}
+                  >
+                    These YAML snippets override the defaults on the left using
+                    Helm’s <code>values.yaml</code> merge rules.
+                  </p>
+                )}
+
                 <div
-                  ref={ovrRef}
+                  ref={ovrDivRef}
                   style={{
                     height: "48vh",
                     border: "1px solid var(--border)",
                     borderRadius: 6,
                   }}
                 />
+
+                {/* action buttons */}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: ".6rem",
+                    marginTop: ".8rem",
+                  }}
+                >
+                  {editing ? (
+                    <>
+                      <button
+                        className="btn-secondary"
+                        onClick={() => {
+                          // revert edits & exit edit mode
+                          setEditing(false);
+                          yamlRef.current = vals.overrideValues || "";
+                        }}
+                        disabled={busy}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="btn"
+                        onClick={openPreview}
+                        disabled={busy}
+                      >
+                        {busy ? "Working…" : "Preview & save"}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            "Editing override values will trigger a Helm upgrade of this release. Continue?",
+                          )
+                        ) {
+                          setEditing(true);
+                        }
+                      }}
+                    >
+                      Edit values
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </>
