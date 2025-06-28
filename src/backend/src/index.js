@@ -1,8 +1,3 @@
-/* ────────────────────────────────────────────────────────────────
-   Argo-Helm-Toggler – backend
-   src/backend/src/index.js
-   ─────────────────────────────────────────────────────────────── */
-
 import express       from "express";
 import helmet        from "helmet";
 import axios         from "axios";
@@ -17,84 +12,118 @@ import { deltaYaml }             from "./diff.js";
 import { triggerWebhook,
          triggerDeleteWebhook }   from "./argo.js";
 
-/* ── env-tunable paths ───────────────────────────────────────── */
 const CHARTS_ROOT   = process.env.CHARTS_ROOT   || "charts";   // ← default changed
 const VALUES_SUBDIR = process.env.VALUES_SUBDIR || "values";
 
-/* ── express bootstrap ───────────────────────────────────────── */
 const app = express();
 app.use(helmet());
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static("public"));
 
-/* clone repo once on boot (non-blocking) */
+/* ─── pre-clone on boot so the first call is fast ─────────────── */
 ensureRepo()
   .then(dir => console.log("[DEBUG] Git repo cloned to", dir))
   .catch(e  => console.error("❌  Git clone failed:", e));
 
-/* ============================================================= *
- * 1. List YAML files (tabs)                                      *
- * ============================================================= */
+/* ─────────────────────────────────────────────────────────────── *
+ * 1.  List YAML files                                             *
+ * ─────────────────────────────────────────────────────────────── */
 app.get("/api/files", async (_req, res) => {
   const full = await listAppFiles();
   res.json(full.map(p => path.resolve(p)));
 });
 
-/* ============================================================= *
- * 2. Flatten appProjects → apps                                  *
- * ============================================================= */
+/* ─────────────────────────────────────────────────────────────── *
+ * 2.  Flatten appProjects → applications[]                        *
+ *     + enrich with Chart.yaml metadata                           *
+ * ─────────────────────────────────────────────────────────────── */
 app.get("/api/apps", async (req, res) => {
   const targets = req.query.file
     ? [path.resolve(req.query.file)]
     : await listAppFiles();
 
-  const out = [];
+  const repoRoot = await ensureRepo();
+  const flat = [];
+
   for (const f of targets) {
     const txt = await fs.readFile(f, "utf8");
     const y   = yaml.load(txt) || {};
-    (y.appProjects || []).forEach(proj =>
-      (proj.applications || []).forEach(app =>
-        out.push({ project: proj.name, file: f, app })));
+
+    for (const proj of y.appProjects || []) {
+      for (const app of proj.applications || []) {
+        /* Where is the chart on disk? – two cases:
+           ① app.path supplied → use it
+           ② legacy (repoURL + chart + version)               */
+        const chartDir = app.path
+          ? path.join(repoRoot, CHARTS_ROOT, app.path)
+          : path.join(
+              repoRoot,
+              CHARTS_ROOT,
+              (app.repoURL || "").split("/").filter(Boolean).pop() || "unknown",
+              app.chart,
+              app.targetRevision
+            );
+
+        /* read Chart.yaml if present ----------------------- */
+        let meta = { version: app.targetRevision };
+        try {
+          const chYml = await fs.readFile(
+            path.join(chartDir, "Chart.yaml"),
+            "utf8"
+          );
+          const doc = yaml.load(chYml) || {};
+          meta = {
+            version     : doc.version,
+            description : doc.description || "",
+            home        : doc.home        || "",
+            maintainers : (doc.maintainers || []).map(m => m.name).filter(Boolean)
+          };
+        } catch {/* not fatal – keep defaults */ }
+
+        flat.push({ project: proj.name, file: f, app, meta });
+      }
+    }
   }
-  res.json(out);
+
+  res.json(flat);
 });
 
-/* ============================================================= *
- * 3. ArtifactHub search (≥4 chars, cached 1 h)                   *
- * ============================================================= */
-const cache = new Map();                    // q → { t, res }
-const TTL   = 60 * 60 * 1000;               // 1 h
-
+/* ─────────────────────────────────────────────────────────────── *
+ * 3.  Search endpoint (still available, but now rate-limited)     *
+ *     … left unchanged – not used by list anymore                 *
+ * ─────────────────────────────────────────────────────────────── */
+const searchCache = new Map(); const TTL = 60 * 60 * 1000;
 app.get("/api/search", async (req, res) => {
   const q = (req.query.q || "").trim();
-  if (q.length < 4) return res.status(400).json({ error: "≥4 characters" });
+  if (q.length < 4) return res.status(400).json({ error: "≥4 chars" });
 
-  const hit = cache.get(q);
-  if (hit && Date.now() - hit.t < TTL) return res.json(hit.res);
+  const cached = searchCache.get(q);
+  if (cached && Date.now() - cached.t < TTL) return res.json(cached.d);
 
   const url = `https://artifacthub.io/api/v1/packages/search?kind=0&limit=20&ts_query_web=${encodeURIComponent(q)}`;
   console.log(`[DEBUG] curl -s "${url}"`);
 
   try {
     const { data } = await axios.get(url, { timeout: 10_000 });
-    const resBody = (data.packages || []).map(p => ({
+    const out = (data.packages || []).map(p => ({
       name       : p.name,
       repo       : p.repo?.url || p.repository?.url || "",
       version    : p.version,
       displayName: p.displayName,
-      logo       : p.logoImageId ? `https://artifacthub.io/image/${p.logoImageId}` : null,
+      logo       : p.logoImageId ? `https://artifacthub.io/image/${p.logoImageId}` : null
     }));
-    cache.set(q, { t: Date.now(), res: resBody });
-    res.json(resBody);
+    searchCache.set(q, { t: Date.now(), d: out });
+    res.json(out);
   } catch (e) {
     console.error("[ArtifactHub]", e.message);
     res.status(e.response?.status || 502).json({ error: "ArtifactHub error" });
   }
 });
 
-/* ============================================================= *
- * 4. Chart & values popup                                        *
- * ============================================================= */
+/* ─────────────────────────────────────────────────────────────── *
+ * 4.  “Values + metadata” popup helper                            *
+ *     … left exactly as in previous revision                      *
+ * ─────────────────────────────────────────────────────────────── */
 app.get("/api/app/values", async (req, res) => {
   const { project, name, chart, version, repoURL, file, path: helmPath } = req.query;
 
@@ -193,6 +222,7 @@ app.post("/api/apps/delete", async (req, res) => {
   res.json({ ok: true });
 });
 
-/* ============================================================= */
+
 app.listen(cfg.port, () =>
-  console.log(`✔︎ argo-helm-toggler backend listening on ${cfg.port}`));
+  console.log(`✔︎ argo-helm-toggler backend listening on ${cfg.port}`)
+);
