@@ -1,11 +1,11 @@
 /*  ValuesEditor.jsx
     ───────────────────────────────────────────────────────────────
-    “Install chart” flow – lets the user
+    Install / Download flow
 
-      ① pick version + (optional) namespace
-      ② tweak values.yaml        ··· only if NOT download-only
-      ③ preview the override YAML · only if installing
-      ④ Install  or  Download-only
+      ① pick version
+      ② (optional) enter App name + Namespace
+      ③ tweak values.yaml  ← only if NOT download-only
+      ④ Install ArgoCD Application  or  Download chart
 */
 
 import React, { useEffect, useRef, useState } from "react";
@@ -32,9 +32,7 @@ function useFetch(url, deps, cb) {
     (async () => {
       try {
         cb(await fetchSmart(url, { signal: ctrl.signal }));
-      } catch {
-        /* caller decides */
-      }
+      } catch {/* ignore */ }
     })();
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -49,18 +47,19 @@ export default function ValuesEditor({ chart, onBack }) {
   /* ─── state ────────────────────────────────────────────────── */
   const [versions, setVers]   = useState([]);
   const [ver, setVer]         = useState("");
-  const [initVals, setInit]   = useState("");       // initial YAML
+  const [initVals, setInit]   = useState("");
+  const [appName, setAppName] = useState(chart.name);   // NEW
   const [ns, setNs]           = useState(chart.name);
   const [busy, setBusy]       = useState(true);
-  const [preview, setPre]     = useState(null);     // { delta:string } | null
-  const [downloadOnly, setDL] = useState(false);    // ⬅ NEW
+  const [preview, setPre]     = useState(null);
+  const [downloadOnly, setDL] = useState(false);
 
   /* ─── refs ─────────────────────────────────────────────────── */
-  const edDivRef = useRef(null);   // <div> hosting Monaco
-  const edRef    = useRef(null);   // Monaco instance
-  const ymlRef   = useRef("");     // live YAML text
+  const edDivRef = useRef(null);
+  const edRef    = useRef(null);
+  const ymlRef   = useRef("");
 
-  /* ① fetch version list (CORS-free via backend) */
+  /* ① versions list (Artifact Hub) */
   useFetch(
     `/api/chart/versions?owner=${chart.repoName}&chart=${chart.name}`,
     [chart.repoName, chart.name],
@@ -70,7 +69,7 @@ export default function ValuesEditor({ chart, onBack }) {
     },
   );
 
-  /* ② fetch default values whenever the version changes */
+  /* ② chart default values */
   useEffect(() => {
     if (!ver) return;
     let done = false;
@@ -99,14 +98,12 @@ export default function ValuesEditor({ chart, onBack }) {
     };
   }, [chart.packageId, ver]);
 
-  /* ③ mount / dispose Monaco depending on download-only toggle */
+  /* ③ mount / dispose Monaco depending on download-only */
   useEffect(() => {
-    // dispose editor when switching to download-only
     if (downloadOnly && edRef.current) {
       edRef.current.dispose();
       edRef.current = null;
     }
-
     if (busy || downloadOnly || !edDivRef.current || edRef.current) return;
 
     edRef.current = monaco.editor.create(edDivRef.current, {
@@ -125,7 +122,7 @@ export default function ValuesEditor({ chart, onBack }) {
 
   /* ─── helpers ──────────────────────────────────────────────── */
   async function openPreview() {
-    if (downloadOnly) return; // not relevant
+    if (downloadOnly) return;
     setBusy(true);
     try {
       const delta = await fetchSmart("/api/delta", {
@@ -138,8 +135,8 @@ export default function ValuesEditor({ chart, onBack }) {
       });
       setPre({ delta });
     } catch (e) {
-      console.error("Unable to compute YAML delta:", e);
-      alert("⚠️  Could not compute YAML delta. Check console.");
+      console.error("Δ-preview error:", e);
+      alert("Could not compute YAML delta – see console.");
     } finally {
       setBusy(false);
     }
@@ -148,24 +145,28 @@ export default function ValuesEditor({ chart, onBack }) {
   async function deploy() {
     setBusy(true);
 
-    /* choose endpoint based on mode */
-    const url = downloadOnly ? "/api/download" : "/api/apps";
+    const url  = downloadOnly ? "/api/download" : "/api/apps";
+    let body;
 
-    const body = downloadOnly
-      ? {
-          chart: chart.name,
-          repo: chart.repoURL,
-          version: ver,
-        }
-      : {
-          chart: chart.name,
-          repo: chart.repoURL,
-          version: ver,
-          release: chart.name,
-          namespace: ns,
-          userValuesYaml:
-            (preview?.delta || "").trim() || "# (no overrides)",
-        };
+    if (downloadOnly) {
+      body = {
+        chart: chart.name,
+        repo:  chart.repoURL,
+        version: ver,
+      };
+    } else {
+      const deltaStr   = (preview?.delta || "").trim() || "# (no overrides)";
+      const encodedStr = btoa(deltaStr);               // base-64 ⬅ NEW
+
+      body = {
+        chart:   chart.name,
+        repo:    chart.repoURL,
+        version: ver,
+        release: appName,          // NEW → chosen Application name
+        namespace: ns,
+        userValuesYaml: encodedStr // base-64 encoded
+      };
+    }
 
     try {
       await fetch(url, {
@@ -173,7 +174,7 @@ export default function ValuesEditor({ chart, onBack }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      alert(downloadOnly ? "Download triggered!" : "Deploy sent!");
+      alert(downloadOnly ? "Download triggered!" : "Install request sent!");
       onBack();
     } finally {
       setBusy(false);
@@ -242,7 +243,7 @@ export default function ValuesEditor({ chart, onBack }) {
               Back
             </button>
             <button className="btn" onClick={deploy}>
-              {busy ? "Saving…" : "Install"}
+              {busy ? "Working…" : "Install ArgoCD Application"}
             </button>
           </div>
         </div>
@@ -351,9 +352,20 @@ export default function ValuesEditor({ chart, onBack }) {
         Application yet)
       </label>
 
-      {/* namespace + editor – only for install */}
+      {/* extra inputs only for install path */}
       {showEditor && (
         <>
+          <label style={{ marginTop: "1rem" }}>Application&nbsp;name</label>
+          <input
+            value={appName}
+            onChange={(e) => setAppName(e.target.value)}
+            style={{
+              width: "100%",
+              padding: ".55rem .8rem",
+              fontSize: ".95rem",
+            }}
+          />
+
           <label style={{ marginTop: "1rem" }}>Namespace</label>
           <input
             value={ns}
@@ -375,7 +387,7 @@ export default function ValuesEditor({ chart, onBack }) {
         </>
       )}
 
-      {/* primary action button */}
+      {/* primary action */}
       <button
         className="btn"
         onClick={downloadOnly ? deploy : openPreview}
@@ -385,7 +397,7 @@ export default function ValuesEditor({ chart, onBack }) {
           ? "Working…"
           : downloadOnly
           ? "Download"
-          : "Install"}
+          : "Install ArgoCD Application"}
       </button>
     </>
   );
