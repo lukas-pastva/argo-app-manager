@@ -1,29 +1,29 @@
 import React, { useEffect, useState } from "react";
+import AppDetails from "./AppDetails.jsx";
 
-const FETCH_ICONS = false;            // ← set to true to re-enable look-ups
+const FETCH_ICONS = false;              // ← keep false to avoid 429s
 
 export default function AppsList({ file }) {
-  const [apps,  setApps]  = useState([]);
-  const [icons, setIcons] = useState({});   // key → imgURL | false (= tried)
+  const [flat,  setFlat]  = useState([]);      // flat backend list
+  const [icons, setIcons] = useState({});      // key → logoURL | false
+  const [sel,   setSel]   = useState(null);    // currently opened details
 
-  /* ─── YAML → apps list ───────────────────────────────────────── */
+  /* --- load apps for active file -------------------------------- */
   useEffect(() => {
     if (!file) return;
     fetch(`/api/apps?file=${encodeURIComponent(file)}`)
       .then((r) => r.json())
-      .then(setApps);
+      .then(setFlat);
   }, [file]);
 
-  /* ─── (optional) logo fetch with “try only once” guard ───────── */
+  /* --- optional logo look-ups ----------------------------------- */
   useEffect(() => {
     if (!FETCH_ICONS) return;
-
-    apps.forEach(({ app }) => {
-      const { repoURL, chart } = app;
-      if (!chart || chart.length < 4) return;       // skip short names
-
+    flat.forEach(({ app }) => {
+      const { repoURL = "", chart = "" } = app;
+      if (chart.length < 4) return;
       const key = `${repoURL}/${chart}`;
-      if (icons[key] !== undefined) return;        // already done (true/false)
+      if (icons[key] !== undefined) return;
 
       fetch(`/api/search?q=${encodeURIComponent(chart)}`)
         .then((r) => r.json())
@@ -31,54 +31,47 @@ export default function AppsList({ file }) {
           const hit = arr.find((p) => p.name === chart);
           setIcons((m) => ({ ...m, [key]: hit?.logo || false }));
         })
-        .catch(() => setIcons((m) => ({ ...m, [key]: false }))); // remember fail
+        .catch(() => setIcons((m) => ({ ...m, [key]: false })));
     });
-  }, [apps, icons]);
+  }, [flat, icons]);
 
-  /* ─── delete helper ──────────────────────────────────────────── */
-  async function del(name, project) {
-    if (!window.confirm(`Delete ${name} (${project})?`)) return;
-    await fetch("/api/apps/delete", {
-      method : "POST",
-      headers: { "Content-Type": "application/json" },
-      body   : JSON.stringify({ release: name, namespace: project }),
-    });
-    setApps((a) => a.filter(({ app }) => app.name !== name));
-  }
+  /* --- group by project ----------------------------------------- */
+  const grouped = flat.reduce((m, it) => {
+    (m[it.project] ??= []).push(it);
+    return m;
+  }, {});
 
-  /* ─── render ─────────────────────────────────────────────────── */
+  /* --- render ---------------------------------------------------- */
   return (
     <>
       <h2>Applications</h2>
-      {apps.length === 0 && <p>No applications in this file.</p>}
 
-      <div className="apps-list">
-        {apps.map(({ project, app }) => {
-          const { name, repoURL, chart } = app;
-          const key  = `${repoURL}/${chart}`;
-          const logo = icons[key];
+      {Object.entries(grouped).map(([project, apps]) => (
+        <div key={project} style={{ marginBottom: "1.5rem" }}>
+          <h3 style={{ margin: "0.6rem 0" }}>{project}</h3>
 
-          return (
-            <div className="app-card" key={project + "/" + name}>
-              {logo ? <img src={logo} alt="" /> : <span>📦</span>}
+          <div className="apps-list">
+            {apps.map(({ app, file }) => {
+              const key   = `${app.repoURL}/${app.chart}`;
+              const logo  = icons[key];
+              const click = () => setSel({ project, file, app });
 
-              <div>
-                <span className="name">{name}</span>
-                <br />
-                <small>{project}</small>
-              </div>
+              return (
+                <div className="app-card" key={project + "/" + app.name} onClick={click}>
+                  {logo ? <img src={logo} alt="" /> : <span>📦</span>}
+                  <div>
+                    <span className="name">{app.name}</span>
+                    <br />
+                    <small>{app.chart}:{app.targetRevision}</small>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
 
-              <span
-                className="del-btn"
-                onClick={() => del(name, project)}
-                title="Delete"
-              >
-                🗑
-              </span>
-            </div>
-          );
-        })}
-      </div>
+      {sel && <AppDetails {...sel} onClose={() => setSel(null)} />}
     </>
   );
 }
