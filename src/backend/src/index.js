@@ -4,7 +4,6 @@
     * REST endpoints consumed by the tiny React UI
     * 2025-06-28  – @luke
 */
-
 import express       from "express";
 import helmet        from "helmet";
 import axios         from "axios";
@@ -13,22 +12,18 @@ import fs            from "fs/promises";
 import path          from "node:path";
 import { spawnSync } from "node:child_process";
 
-import cfg                          from "./config.js";
+import cfg                       from "./config.js";
 import { ensureRepo, listAppFiles } from "./git.js";
-import { deltaYaml }                from "./diff.js";
-import {
-  triggerWebhook,
-  triggerDeleteWebhook,
-}                                   from "./argo.js";
+import { deltaYaml }             from "./diff.js";
+import { triggerWebhook,
+         triggerDeleteWebhook }   from "./argo.js";
 
 /* ────────── constants ────────────────────────────────────────── */
-export const CHARTS_ROOT   = process.env.CHARTS_ROOT   || "charts"; // inside repo
+export const CHARTS_ROOT   = process.env.CHARTS_ROOT   || "charts";
 export const VALUES_SUBDIR = process.env.VALUES_SUBDIR || "values";
 
 /* ────────── app setup ────────────────────────────────────────── */
 const app = express();
-
-/* Helmet with a relaxed CSP so the frontend can call Artifact Hub  */
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -43,21 +38,20 @@ app.use(
     },
   }),
 );
-
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static("public"));
 
 /* Sanity-clone once at boot so the first UI load is faster —— */
 ensureRepo()
-  .then((dir) => console.log("[BOOT] Git repo cloned →", dir))
-  .catch((e) => console.error("❌  Git clone failed:", e));
+  .then(dir => console.log("[BOOT] Git repo cloned →", dir))
+  .catch(e  => console.error("❌  Git clone failed:", e));
 
 /* ═══════════════════════════════════════════════════════════════
    1.  List YAML files (app-of-apps*)
    ═════════════════════════════════════════════════════════════ */
 app.get("/api/files", async (_req, res) => {
   const full = await listAppFiles();
-  res.json(full.map((p) => path.resolve(p)));
+  res.json(full.map(p => path.resolve(p)));
 });
 
 /* ═══════════════════════════════════════════════════════════════
@@ -72,20 +66,17 @@ app.get("/api/apps", async (req, res) => {
   for (const f of targets) {
     const txt = await fs.readFile(f, "utf8");
     const y   = yaml.load(txt) || {};
-    (y.appProjects || []).forEach((proj) =>
-      (proj.applications || []).forEach((app) =>
-        flat.push({ project: proj.name, file: f, app })),
-    );
+    (y.appProjects || []).forEach(proj =>
+      (proj.applications || []).forEach(app =>
+        flat.push({ project: proj.name, file: f, app })));
   }
   res.json(flat);
 });
 
 /* ═══════════════════════════════════════════════════════════════
-   3.  Artifact Hub search (≥4 chars, 1-h cache, name-only list)
+   3.  ArtifactHub search (≥4 chars, 1-h cache)
    ═════════════════════════════════════════════════════════════ */
-const searchCache = new Map();
-const TTL = 60 * 60 * 1000;
-
+const searchCache = new Map(); const TTL = 60 * 60 * 1000;
 app.get("/api/search", async (req, res) => {
   const q = (req.query.q || "").trim();
   if (q.length < 4) return res.status(400).json({ error: "≥4 chars" });
@@ -94,19 +85,18 @@ app.get("/api/search", async (req, res) => {
   if (cached && Date.now() - cached.t < TTL) return res.json(cached.d);
 
   const url =
-    `https://artifacthub.io/api/v1/packages/search?kind=0&limit=20&ts_query_web=` +
-    encodeURIComponent(q);
-
+    `https://artifacthub.io/api/v1/packages/search?kind=0&limit=20&ts_query_web=${
+      encodeURIComponent(q)}`;
   console.log("[ArtHub] GET", url);
   try {
     const { data } = await axios.get(url, { timeout: 10000 });
-    const out = (data.packages || []).map((p) => ({
-      name       : p.name,
-      repo       : p.repository?.url || "",
-      version    : p.version,
-      description: p.description,
-      displayName: p.display_name || p.displayName,
-      logo       : p.logo_image_id
+    const out = (data.packages || []).map(p => ({
+      name        : p.name,
+      repo        : p.repository?.url || "",
+      version     : p.version,
+      description : p.description,
+      displayName : p.display_name || p.displayName,
+      logo        : p.logo_image_id
         ? `https://artifacthub.io/image/${p.logo_image_id}`
         : null,
     }));
@@ -119,12 +109,12 @@ app.get("/api/search", async (req, res) => {
 });
 
 /* ═══════════════════════════════════════════════════════════════
-   4.  Chart default & override values  (App-details modal)
-       – repoURL is IGNORED – we only use the path:
+   4.  Chart default & override values  (App details modal)
    ═════════════════════════════════════════════════════════════ */
 app.get("/api/app/values", async (req, res) => {
   const { project, name, path: chartPath, file } = req.query;
-  if (!project || !name) return res.status(400).json({ error: "params missing" });
+  if (!project || !name)
+    return res.status(400).json({ error: "params missing" });
 
   /* ── resolve paths inside the local Git clone ─────────────── */
   const repoRoot = await ensureRepo();
@@ -134,63 +124,66 @@ app.get("/api/app/values", async (req, res) => {
   const version = seg.at(-1);
   const chart   = seg.at(-2);
   const owner   = seg.at(-3) || "unknown";
+  const cat     = seg.at(0)  || "external";      // external / internal / …
 
-  /* values override (either .yaml or .yml) is next to the YAML file */
+  /* values override (.yaml or .yml) is next to the YAML file */
   const fileDir   = path.dirname(file);
   const valYAML   = path.join(fileDir, VALUES_SUBDIR, `${name}.yaml`);
   const valYML    = path.join(fileDir, VALUES_SUBDIR, `${name}.yml`);
   const chartFile = path.join(
-    repoRoot, CHARTS_ROOT, owner, chart, version, "values.yaml",
-  );
+    repoRoot, CHARTS_ROOT, cat, owner, chart, version, "values.yaml");
 
-  let overrideY = "";
-  let defaultY  = "";
-  try {
-    overrideY = await fs.readFile(valYAML, "utf8");
-  } catch {
+  let overrideY = "", defaultY = "";
+  try { overrideY = await fs.readFile(valYAML, "utf8"); }
+  catch {
     try { overrideY = await fs.readFile(valYML, "utf8"); } catch {}
   }
   try { defaultY  = await fs.readFile(chartFile, "utf8"); } catch {}
 
   console.log(`[vals] ${project}/${name}`);
-  console.log(
-    "       override:", overrideY ? "✔︎" : "✖︎", "→",
-    overrideY ? (valYAML.includes(".yaml") ? valYAML : valYML) : "—",
-  );
+  console.log("       override:", overrideY ? "✔︎" : "✖︎",
+              "→", overrideY ? (valYAML.includes(".yaml") ? valYAML : valYML) : "—");
   console.log("       default :", defaultY ? "✔︎" : "✖︎", "→", chartFile);
 
   res.json({ defaultValues: defaultY, overrideValues: overrideY });
 });
 
 /* ═══════════════════════════════════════════════════════════════
-   5.  Versions available for a chart
-       • first list local dirs
-       • if none found, FALL BACK to ArtifactHub
+   5.  Version list for a chart
    ═════════════════════════════════════════════════════════════ */
 app.get("/api/chart/versions", async (req, res) => {
   const { owner = "unknown", chart } = req.query;
   if (!chart) return res.status(400).json({ error: "chart required" });
 
   const repoRoot = await ensureRepo();
-  const baseDir  = path.join(repoRoot, CHARTS_ROOT, owner, chart);
 
+  /* look under charts/<cat>/<owner>/<chart>/ */
+  const categories = ["external", "internal", ""];   // "" → direct charts/OWNER
   let versions = [];
-  try {
-    const dirents = await fs.readdir(baseDir, { withFileTypes: true });
-    versions      = dirents.filter((d) => d.isDirectory()).map((d) => d.name);
-    console.log(`[ver] Local dir ${baseDir} → ${versions.length} hits`);
-  } catch {
-    console.log(`[ver] Local dir ${baseDir} missing`);
+
+  for (const cat of categories) {
+    const base = cat
+      ? path.join(repoRoot, CHARTS_ROOT, cat, owner, chart)
+      : path.join(repoRoot, CHARTS_ROOT, owner, chart);
+
+    try {
+      const dirents = await fs.readdir(base, { withFileTypes: true });
+      versions = dirents.filter(d => d.isDirectory()).map(d => d.name);
+      if (versions.length) {
+        console.log(`[ver] Local dir ${base} → ${versions.length} hits`);
+        break;
+      }
+    } catch { /* ignore probe failures */ }
   }
 
-  /* if local clone has no versions → remote query (best-effort) */
+  /* fall back to ArtifactHub if local clone has none */
   if (versions.length === 0) {
     try {
       const url =
         `https://artifacthub.io/api/v1/packages/helm/${owner}/${chart}/versions?limit=40`;
       console.log("[ArtHub] versions", url);
       const { data } = await axios.get(url, { timeout: 8000 });
-      versions      = (data || []).map((v) => v.version);
+      versions = (data || []).map(v => v.version);
     } catch (e) {
       console.error("[ArtHub] versions error:", e.message);
     }
@@ -200,17 +193,15 @@ app.get("/api/chart/versions", async (req, res) => {
 });
 
 /* ═══════════════════════════════════════════════════════════════
-   6.  Get chart’s default values.yaml (from repo)
-       – EXTERNAL CHARTS ONLY (no network)
+   6.  Get chart’s default values.yaml (local clone only)
    ═════════════════════════════════════════════════════════════ */
 app.get("/api/chart/values", async (req, res) => {
   const { owner = "unknown", chart, ver } = req.query;
   if (!chart || !ver) return res.status(400).json({ error: "missing fields" });
 
   try {
-    const p   = path.join(
-      await ensureRepo(), CHARTS_ROOT, owner, chart, ver, "values.yaml",
-    );
+    const p = path.join(
+      await ensureRepo(), CHARTS_ROOT, "external", owner, chart, ver, "values.yaml");
     const txt = await fs.readFile(p, "utf8");
     res.type("text/plain").send(txt);
   } catch {
@@ -222,24 +213,14 @@ app.get("/api/chart/values", async (req, res) => {
    7.  Create / update  (webhook → CI job)
    ═════════════════════════════════════════════════════════════ */
 app.post("/api/apps", async (req, res) => {
-  const {
-    chart,
-    repo,
-    version,
-    release,
-    namespace,
-    userValuesYaml,
-    project = namespace,
-  } = req.body;
+  const { chart, repo, version, release, namespace,
+          userValuesYaml, project = namespace } = req.body;
   if (!chart || !repo || !release || !namespace)
     return res.status(400).json({ error: "missing fields" });
 
   const helm = spawnSync("helm", [
-    "show",
-    "values",
-    `${repo.endsWith("/") ? repo : repo + "/"}${chart}`,
-    "--version",
-    version,
+    "show", "values", `${repo.endsWith("/") ? repo : repo + "/"}${chart}`,
+    "--version", version,
   ]);
   if (helm.status !== 0) {
     console.error("[helm show] failed", helm.stderr.toString());
@@ -247,15 +228,8 @@ app.post("/api/apps", async (req, res) => {
   }
 
   const delta = deltaYaml(helm.stdout.toString(), userValuesYaml);
-  await triggerWebhook({
-    chart,
-    repo,
-    version,
-    release,
-    namespace,
-    project,
-    values_yaml: delta,
-  });
+  await triggerWebhook({ chart, repo, version, release,
+                         namespace, project, values_yaml: delta });
   res.json({ ok: true });
 });
 
@@ -272,5 +246,4 @@ app.post("/api/apps/delete", async (req, res) => {
 
 /* ─────────────────────────────────────────────────────────────── */
 app.listen(cfg.port, () =>
-  console.log(`✔︎ backend listening on ${cfg.port}`),
-);
+  console.log(`✔︎ backend listening on ${cfg.port}`));
