@@ -55,7 +55,7 @@ VALUES_SUBDIR="${VALUES_SUBDIR:-values}"
 PUSH_BRANCH="${PUSH_BRANCH:-main}"
 
 apps_file="${APPS_DIR}/${APP_FILE_NAME}"
-values_file="${VALUES_SUBDIR}/${var_release}.yml"
+values_file="${VALUES_SUBDIR}/${var_release}.yaml"
 chart_path="charts/external/${var_owner}/${var_chart}/${var_version}"
 
 log "📁  Paths:"
@@ -123,7 +123,7 @@ command -v yq >/dev/null || { log "❌  yq v4 required"; exit 1; }
 log "🛠  yq version: $(yq --version)"
 
 export VAR_NAME="${var_name}"
-export CHART_PATH="${var_owner}/${var_chart}/${var_version}"
+export CHART_PATH="external/${var_owner}/${var_chart}/${var_version}"
 export GITOPS_REPO
 
 yq_filter='.appProjects = (.appProjects // []) |
