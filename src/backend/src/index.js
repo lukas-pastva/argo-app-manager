@@ -130,58 +130,28 @@ app.get("/api/app/values", async (req, res) => {
 });
 
 /* ════════════════════════════════════════════════════════════════
-   4.  Artifact Hub helpers (versions & default values)
+   4.  Artifact Hub helpers (versions + default values)
    ═══════════════════════════════════════════════════════════════ */
 app.get("/api/chart/versions", async (req, res) => {
-  const { owner: repo, chart, limit = 40, pkgId } = req.query;
-  if (!repo && !pkgId) {
-    return res.status(400).json({ error: "owner or pkgId required" });
-  }
-  if (!pkgId && !chart) {
-    return res.status(400).json({ error: "chart required when using owner" });
-  }
+  const { owner: repo, chart, limit = 40 } = req.query;
+  if (!repo || !chart)
+    return res.status(400).json({ error: "owner & chart required" });
 
-  // pkgId-based path
-  if (pkgId) {
-    console.log(`[vers-pkg] pkgId=${pkgId} limit=${limit}`);
-    try {
-      const { data } = await axios.get(
-        `${ARTHUB_BASE}/packages/${encodeURIComponent(pkgId)}/versions`,
-        { timeout: 10_000 },
-      );
-      const arr = data.versions || [];
-      console.log(
-        `[vers-pkg] raw versions count=${arr.length}, sample=`,
-        JSON.stringify(arr.slice(0,3), null, 2)
-      );
-      const versions = arr.slice(0, +limit).map(v => ({
-        version: v.version,
-        date   : v.created || v.created_at || v.published_at || null,
-      }));
-      console.log(`[vers-pkg] returning ${versions.length} versions`);
-      return res.json(versions);
-    } catch (e) {
-      console.warn("[ArtHub] pkg versions error:", e.message);
-      // fallback below
-    }
-  }
-
-  // fallback owner+chart path
   console.log(`[vers] repo=${repo} chart=${chart} limit=${limit}`);
+
   try {
     const { data } = await axios.get(
       `${ARTHUB_BASE}/packages/helm/${encodeURIComponent(repo)}/${encodeURIComponent(chart)}`,
       { timeout: 10_000 },
     );
-    const raw = data.available_versions || [];
+    /* DEBUG: show raw first entries */
     console.log(
-      `[vers] raw available_versions count=${raw.length}, sample=`,
-      JSON.stringify(raw.slice(0,3), null, 2)
+      `[vers-raw] count=${(data.available_versions||[]).length}, sample=`,
+      JSON.stringify(data.available_versions.slice(0,3), null, 2)
     );
-    const versions = raw.slice(0, +limit).map(v => ({
-      version: v.version,
-      date   : v.created_at || v.published_at || null,
-    }));
+    const versions = (data.available_versions || [])
+      .slice(0, +limit)
+      .map(v => ({ version: v.version, date: v.created_at || null }));
     console.log(`[vers] returning ${versions.length} versions`);
     res.json(versions);
   } catch (e) {
@@ -193,10 +163,11 @@ app.get("/api/chart/versions", async (req, res) => {
 /* 4-b  fetch raw values.yaml for a given pkgId+version */
 app.get("/api/chart/values", async (req, res) => {
   const { pkgId, version } = req.query;
-  if (!pkgId || !version) {
+  if (!pkgId || !version)
     return res.status(400).json({ error: "pkgId & version required" });
-  }
+
   console.log(`[vals-api] pkgId=${pkgId} ver=${version}`);
+
   try {
     const { data } = await axios.get(
       `${ARTHUB_BASE}/packages/${pkgId}/${version}/values`,
@@ -216,6 +187,7 @@ app.post("/api/delta", (req, res) => {
   const delta = deltaYaml(defaultYaml, userYaml);
   res.type("text/yaml").send(delta);
 });
+
 
 /* ════════════════════════════════════════════════════════════════
    6.  Webhook proxies  (install / delete / upgrade)
@@ -274,6 +246,5 @@ app.post("/api/download", async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
-
 /* ────────── go! ──────────────────────────────────────────────── */
 app.listen(cfg.port, () => console.log(`✔︎ backend listening on ${cfg.port}`));
