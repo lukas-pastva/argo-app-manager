@@ -58,8 +58,8 @@ export default function ValuesEditor({ chart, onBack }) {
 
   /* ① fetch versions (owner = repoName, now with dates) -------- */
   useFetch(
-    `/api/chart/versions?owner=${encodeURIComponent(chart.repoName)}&chart=${encodeURIComponent(chart.name)}`,
-    [chart.name, chart.repoName],
+    `/api/chart/versions?pkgId=${encodeURIComponent(chart.packageId)}&limit=40`,
+    [chart.packageId],
     (arr = []) => { setVers(arr); setVer(arr[0]?.version || ""); }
   );
 

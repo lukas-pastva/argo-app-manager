@@ -143,6 +143,35 @@ app.get("/api/chart/versions", async (req, res) => {
   if (!repo || !chart)
     return res.status(400).json({ error: "owner & chart required" });
 
+  /* ─── pkgId-based lookup (preferred, has dates) ───────────── */
+  const { pkgId } = req.query;
+  if (pkgId) {
+    console.log(`[vers-pkg] pkgId=${pkgId} limit=${limit}`);
+    try {
+      // fetch full list of versions for this package
+      const { data } = await axios.get(
+        `${ARTHUB_BASE}/packages/${encodeURIComponent(pkgId)}/versions`,
+        { timeout: 10_000 },
+      );
+      const arr = data.versions || [];
+
+      console.log(
+        `[vers-pkg] got ${arr.length} entries, keys of first: ` +
+        `${JSON.stringify(Object.keys(arr[0] || {}))}`
+      );
+
+      const versions = arr.slice(0, +limit).map(v => ({
+        version: v.version,
+        date: v.created || v.created_at || v.published_at || null,
+      }));
+      console.log(`[vers-pkg] returning ${versions.length} versions`);
+      return res.json(versions);
+    } catch (e) {
+      console.warn("[ArtHub] pkg versions error:", e.message);
+      // fall through to owner+chart fallback
+    }
+  }
+
   console.log(`[vers] repo=${repo} chart=${chart} limit=${limit}`);
 
   try {
@@ -169,13 +198,6 @@ app.get("/api/chart/versions", async (req, res) => {
     console.warn("[ArtHub] versions error:", e.message);
     res.json([]);
   }
-});
-
-/* 4-b  fetch raw values.yaml for a given pkgId+version */
-app.get("/api/chart/values", async (req, res) => {
-  const { pkgId, version } = req.query;
-  if (!pkgId || !version)
-    return res.status(400).json({ error: "pkgId & version required" });
 
   console.log(`[vals-api] pkgId=${pkgId} ver=${version}`);
 
