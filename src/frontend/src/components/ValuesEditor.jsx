@@ -108,9 +108,21 @@ export default function ValuesEditor({ chart, onBack }) {
     return () => edRef.current?.dispose();
   }, [busy, initVals]);
 
-  /* refresh Monaco layout after closing overlays --------------- */
-  useEffect(() => { if (!preview) edRef.current?.layout(); }, [preview]);
-  useEffect(() => { if (!full)    edRef.current?.layout(); }, [full]);
+  /* ────────────────────────────────────────────────────────────
+     BUG-FIX: re-paint Monaco when overlays close
+     ────────────────────────────────────────────────────────── */
+  useEffect(() => {
+    if (!preview && edRef.current) {
+      edRef.current.layout();           // preview dialog closed
+    }
+  }, [preview]);
+
+  useEffect(() => {
+    if (!full && edRef.current) {       // left full-screen
+      edRef.current.setValue(ymlRef.current); // sync edits
+      edRef.current.layout();
+    }
+  }, [full]);
 
   /* ── full-screen editor helper ─────────────────────────────── */
   function FullscreenEditor() {

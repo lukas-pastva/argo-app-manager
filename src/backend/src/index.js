@@ -14,11 +14,11 @@ import cfg                          from "./config.js";
 import { ensureRepo, listAppFiles } from "./git.js";
 import { deltaYaml }                from "./diff.js";
 import {
-  triggerWebhook,          // helm install
-  triggerDeleteWebhook,    // helm uninstall
-  triggerUpgradeWebhook,   // helm upgrade
-  triggerDownloadWebhook   // helm pull-only
-}                           from "./argo.js";
+  triggerWebhook,
+  triggerDeleteWebhook,
+  triggerUpgradeWebhook,
+  triggerDownloadWebhook,
+} from "./argo.js";
 
 /* ───────── constants ─────────────────────────────────────────── */
 export const CHARTS_ROOT   = process.env.CHARTS_ROOT   || "charts";
@@ -28,7 +28,7 @@ const ARTHUB_BASE          = "https://artifacthub.io/api/v1";
 /* ───────── express bootstrap ────────────────────────────────── */
 const app = express();
 
-app.use((req, _res, next) => {           // tiny request log
+app.use((req, _res, next) => {
   console.log(`[REQ] ${req.method} ${req.url}`);
   next();
 });
@@ -50,9 +50,9 @@ app.use(
 
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static("public"));
-app.get("/favicon.ico", (_q, r) => r.status(204).end());   // silence 404s
+app.get("/favicon.ico", (_q, r) => r.status(204).end());
 
-/* ────────── clone (or pull) repo once on boot ──────────────── */
+/* ────────── clone repo once on boot ──────────────────────────── */
 let gitRoot = "";
 ensureRepo()
   .then(dir => {
@@ -60,6 +60,9 @@ ensureRepo()
     console.log("[BOOT] Git repo cloned →", dir);
   })
   .catch(err => console.error("❌  Git clone failed:", err));
+
+/* ════════════════════════════════════════════════════════════════
+   6.  Webhook proxies  (install / delete / upgrade / download)
 
 /* ════════════════════════════════════════════════════════════════
    1.  List app-of-apps YAML files (for the sidebar)
@@ -80,14 +83,15 @@ app.get("/api/apps", async (req, res) => {
     const doc = yaml.load(await fs.readFile(f, "utf8")) ?? {};
     (doc.appProjects || []).forEach(p =>
       (p.applications || []).forEach(a =>
-        flat.push({ project: p.name, file: f, app: a })),
+        flat.push({ project: p.name, file: f, app: a }),
+      ),
     );
   }
   res.json(flat);
 });
 
 /* ════════════════════════════════════════════════════════════════
-   3.  Read chart defaults + override values
+   3.  Read chart defaults + override values from the repo
    ═══════════════════════════════════════════════════════════════ */
 app.get("/api/app/values", async (req, res) => {
   const { name, file: yamlFile, path: chartPath } = req.query;
@@ -100,8 +104,8 @@ app.get("/api/app/values", async (req, res) => {
     VALUES_SUBDIR,
     `${name}.yaml`,
   );
-  const chartDir  = path.join(gitRoot, CHARTS_ROOT, chartPath);
-  const safeRead  = p => fs.readFile(p, "utf8").catch(() => "");
+  const chartDir   = path.join(gitRoot, CHARTS_ROOT, chartPath);
+  const safeRead   = p => fs.readFile(p, "utf8").catch(() => "");
 
   const defaultVals  = await safeRead(path.join(chartDir, "values.yaml"));
   const overrideVals = await safeRead(overrideFile);
@@ -131,10 +135,9 @@ app.get("/api/app/values", async (req, res) => {
 });
 
 /* ════════════════════════════════════════════════════════════════
-   4.  Artifact Hub helpers
+   4.  Artifact Hub helpers (versions & default values)
    ═══════════════════════════════════════════════════════════════ */
-
-/* 4-a  list chart versions **with release dates** */
+/* 4-a  list chart versions **with release dates**  + debug log   */
 app.get("/api/chart/versions", async (req, res) => {
   const { owner: repo, chart, limit = 40 } = req.query;
   if (!repo || !chart)
@@ -147,15 +150,21 @@ app.get("/api/chart/versions", async (req, res) => {
       `${ARTHUB_BASE}/packages/helm/${encodeURIComponent(repo)}/${encodeURIComponent(chart)}`,
       { timeout: 10_000 },
     );
-    /* ← CHANGE: include created_at → {version, date} */
-    res.json(
-      (data.available_versions || [])
-        .slice(0, +limit)
-        .map(v => ({
-          version: v.version,
-          date   : v.created_at || null,
-        })),
+
+    const versions = (data.available_versions || [])
+      .slice(0, +limit)
+      .map(v => ({
+        version: v.version,
+        date   : v.created_at || null,
+      }));
+
+    /* ─── DEBUG: print count + first item ───────────────────── */
+    console.log(
+      `[vers] got ${versions.length} versions` +
+      (versions.length ? ` – first: ${JSON.stringify(versions[0])}` : ""),
     );
+
+    res.json(versions);
   } catch (e) {
     console.warn("[ArtHub] versions error:", e.message);
     res.json([]);
@@ -183,7 +192,7 @@ app.get("/api/chart/values", async (req, res) => {
 });
 
 /* ════════════════════════════════════════════════════════════════
-   5.  YAML-Δ preview
+   5.  YAML-Δ preview (override-only)
    ═══════════════════════════════════════════════════════════════ */
 app.post("/api/delta", (req, res) => {
   const { defaultYaml = "", userYaml = "" } = req.body || {};
@@ -192,9 +201,62 @@ app.post("/api/delta", (req, res) => {
 });
 
 /* ════════════════════════════════════════════════════════════════
-   6.  Webhook proxies (install / delete / upgrade / download)
-   (unchanged)
+   6.  Webhook proxies  (install / delete / upgrade)
    ═══════════════════════════════════════════════════════════════ */
+/* 6-a  install – original endpoint, kept for compatibility         */
+app.post("/api/apps", async (req, res) => {
+  console.log("[apps] Deploy request body:", JSON.stringify(req.body, null, 2));
+  try {
+    await triggerWebhook(req.body);               // helm install
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("[apps] webhook error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* 6-b  alias: /api/sync  → does the same as /api/apps              */
+app.post("/api/sync", async (req, res) => {
+  try { await triggerWebhook(req.body); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* 6-c  delete release                                              */
+app.post("/api/delete", async (req, res) => {
+  try { await triggerDeleteWebhook(req.body); res.json({ ok: true }); }
+  catch (e) {
+    console.error("[delete] webhook error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* 6-d  upgrade (edit existing app)                                 */
+app.post("/api/upgrade", async (req, res) => {
+  console.log("[upgrade] Upgrade request body:",
+              JSON.stringify(req.body, null, 2));
+
+  try {
+    await triggerUpgradeWebhook(req.body);        // helm upgrade
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("[upgrade] webhook error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* 6-e  download chart (pull only – no Application created)         */
+app.post("/api/download", async (req, res) => {
+  console.log("[download] Download request body:",
+              JSON.stringify(req.body, null, 2));
+
+  try {
+    await triggerDownloadWebhook(req.body);       // helm pull
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("[download] webhook error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 /* ────────── go! ──────────────────────────────────────────────── */
 app.listen(cfg.port, () => console.log(`✔︎ backend listening on ${cfg.port}`));
