@@ -62,9 +62,6 @@ ensureRepo()
   .catch(err => console.error("❌  Git clone failed:", err));
 
 /* ════════════════════════════════════════════════════════════════
-   6.  Webhook proxies  (install / delete / upgrade / download)
-
-/* ════════════════════════════════════════════════════════════════
    1.  List app-of-apps YAML files (for the sidebar)
    ═══════════════════════════════════════════════════════════════ */
 app.get("/api/files", async (_req, res) => {
@@ -83,15 +80,14 @@ app.get("/api/apps", async (req, res) => {
     const doc = yaml.load(await fs.readFile(f, "utf8")) ?? {};
     (doc.appProjects || []).forEach(p =>
       (p.applications || []).forEach(a =>
-        flat.push({ project: p.name, file: f, app: a }),
-      ),
+        flat.push({ project: p.name, file: f, app: a })),
     );
   }
   res.json(flat);
 });
 
 /* ════════════════════════════════════════════════════════════════
-   3.  Read chart defaults + override values from the repo
+   3.  Read chart defaults + override values
    ═══════════════════════════════════════════════════════════════ */
 app.get("/api/app/values", async (req, res) => {
   const { name, file: yamlFile, path: chartPath } = req.query;
@@ -104,13 +100,12 @@ app.get("/api/app/values", async (req, res) => {
     VALUES_SUBDIR,
     `${name}.yaml`,
   );
-  const chartDir   = path.join(gitRoot, CHARTS_ROOT, chartPath);
-  const safeRead   = p => fs.readFile(p, "utf8").catch(() => "");
+  const chartDir  = path.join(gitRoot, CHARTS_ROOT, chartPath);
+  const safeRead  = p => fs.readFile(p, "utf8").catch(() => "");
 
   const defaultVals  = await safeRead(path.join(chartDir, "values.yaml"));
   const overrideVals = await safeRead(overrideFile);
 
-  /* mini-meta from Chart.yaml – optional */
   let meta = {};
   try {
     const c = yaml.load(await safeRead(path.join(chartDir, "Chart.yaml"))) || {};
@@ -137,70 +132,71 @@ app.get("/api/app/values", async (req, res) => {
 /* ════════════════════════════════════════════════════════════════
    4.  Artifact Hub helpers (versions & default values)
    ═══════════════════════════════════════════════════════════════ */
-/* 4-a  list chart versions **with release dates**  + debug log   */
 app.get("/api/chart/versions", async (req, res) => {
-  const { owner: repo, chart, limit = 40 } = req.query;
-  if (!repo || !chart)
-    return res.status(400).json({ error: "owner & chart required" });
+  const { owner: repo, chart, limit = 40, pkgId } = req.query;
+  if (!repo && !pkgId) {
+    return res.status(400).json({ error: "owner or pkgId required" });
+  }
+  if (!pkgId && !chart) {
+    return res.status(400).json({ error: "chart required when using owner" });
+  }
 
-  /* ─── pkgId-based lookup (preferred, has dates) ───────────── */
-  const { pkgId } = req.query;
+  // pkgId-based path
   if (pkgId) {
     console.log(`[vers-pkg] pkgId=${pkgId} limit=${limit}`);
     try {
-      // fetch full list of versions for this package
       const { data } = await axios.get(
         `${ARTHUB_BASE}/packages/${encodeURIComponent(pkgId)}/versions`,
         { timeout: 10_000 },
       );
       const arr = data.versions || [];
-
       console.log(
-        `[vers-pkg] got ${arr.length} entries, keys of first: ` +
-        `${JSON.stringify(Object.keys(arr[0] || {}))}`
+        `[vers-pkg] raw versions count=${arr.length}, sample=`,
+        JSON.stringify(arr.slice(0,3), null, 2)
       );
-
       const versions = arr.slice(0, +limit).map(v => ({
         version: v.version,
-        date: v.created || v.created_at || v.published_at || null,
+        date   : v.created || v.created_at || v.published_at || null,
       }));
       console.log(`[vers-pkg] returning ${versions.length} versions`);
       return res.json(versions);
     } catch (e) {
       console.warn("[ArtHub] pkg versions error:", e.message);
-      // fall through to owner+chart fallback
+      // fallback below
     }
   }
 
+  // fallback owner+chart path
   console.log(`[vers] repo=${repo} chart=${chart} limit=${limit}`);
-
   try {
     const { data } = await axios.get(
       `${ARTHUB_BASE}/packages/helm/${encodeURIComponent(repo)}/${encodeURIComponent(chart)}`,
       { timeout: 10_000 },
     );
-
-    const versions = (data.available_versions || [])
-      .slice(0, +limit)
-      .map(v => ({
-        version: v.version,
-        date   : v.created_at || null,
-      }));
-
-    /* ─── DEBUG: print count + first item ───────────────────── */
+    const raw = data.available_versions || [];
     console.log(
-      `[vers] got ${versions.length} versions` +
-      (versions.length ? ` – first: ${JSON.stringify(versions[0])}` : ""),
+      `[vers] raw available_versions count=${raw.length}, sample=`,
+      JSON.stringify(raw.slice(0,3), null, 2)
     );
-
+    const versions = raw.slice(0, +limit).map(v => ({
+      version: v.version,
+      date   : v.created_at || v.published_at || null,
+    }));
+    console.log(`[vers] returning ${versions.length} versions`);
     res.json(versions);
   } catch (e) {
     console.warn("[ArtHub] versions error:", e.message);
     res.json([]);
   }
+});
 
+/* 4-b  fetch raw values.yaml for a given pkgId+version */
+app.get("/api/chart/values", async (req, res) => {
+  const { pkgId, version } = req.query;
+  if (!pkgId || !version) {
+    return res.status(400).json({ error: "pkgId & version required" });
+  }
   console.log(`[vals-api] pkgId=${pkgId} ver=${version}`);
-
   try {
     const { data } = await axios.get(
       `${ARTHUB_BASE}/packages/${pkgId}/${version}/values`,
@@ -214,8 +210,7 @@ app.get("/api/chart/versions", async (req, res) => {
 });
 
 /* ════════════════════════════════════════════════════════════════
-   5.  YAML-Δ preview (override-only)
-   ═══════════════════════════════════════════════════════════════ */
+   5.  YAML-Δ preview (unchanged)                              */
 app.post("/api/delta", (req, res) => {
   const { defaultYaml = "", userYaml = "" } = req.body || {};
   const delta = deltaYaml(defaultYaml, userYaml);
