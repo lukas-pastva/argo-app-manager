@@ -62,6 +62,9 @@ ensureRepo()
   .catch(err => console.error("❌  Git clone failed:", err));
 
 /* ════════════════════════════════════════════════════════════════
+   6.  Webhook proxies  (install / delete / upgrade / download)
+
+/* ════════════════════════════════════════════════════════════════
    1.  List app-of-apps YAML files (for the sidebar)
    ═══════════════════════════════════════════════════════════════ */
 app.get("/api/files", async (_req, res) => {
@@ -80,14 +83,15 @@ app.get("/api/apps", async (req, res) => {
     const doc = yaml.load(await fs.readFile(f, "utf8")) ?? {};
     (doc.appProjects || []).forEach(p =>
       (p.applications || []).forEach(a =>
-        flat.push({ project: p.name, file: f, app: a })),
+        flat.push({ project: p.name, file: f, app: a }),
+      ),
     );
   }
   res.json(flat);
 });
 
 /* ════════════════════════════════════════════════════════════════
-   3.  Read chart defaults + override values
+   3.  Read chart defaults + override values from the repo
    ═══════════════════════════════════════════════════════════════ */
 app.get("/api/app/values", async (req, res) => {
   const { name, file: yamlFile, path: chartPath } = req.query;
@@ -100,12 +104,13 @@ app.get("/api/app/values", async (req, res) => {
     VALUES_SUBDIR,
     `${name}.yaml`,
   );
-  const chartDir  = path.join(gitRoot, CHARTS_ROOT, chartPath);
-  const safeRead  = p => fs.readFile(p, "utf8").catch(() => "");
+  const chartDir   = path.join(gitRoot, CHARTS_ROOT, chartPath);
+  const safeRead   = p => fs.readFile(p, "utf8").catch(() => "");
 
   const defaultVals  = await safeRead(path.join(chartDir, "values.yaml"));
   const overrideVals = await safeRead(overrideFile);
 
+  /* mini-meta from Chart.yaml – optional */
   let meta = {};
   try {
     const c = yaml.load(await safeRead(path.join(chartDir, "Chart.yaml"))) || {};
@@ -130,8 +135,9 @@ app.get("/api/app/values", async (req, res) => {
 });
 
 /* ════════════════════════════════════════════════════════════════
-   4.  Artifact Hub helpers (versions + default values)
+   4.  Artifact Hub helpers (versions & default values)
    ═══════════════════════════════════════════════════════════════ */
+/* 4-a  list chart versions **with release dates**  + debug log   */
 app.get("/api/chart/versions", async (req, res) => {
   const { owner: repo, chart, limit = 40 } = req.query;
   if (!repo || !chart)
@@ -144,15 +150,20 @@ app.get("/api/chart/versions", async (req, res) => {
       `${ARTHUB_BASE}/packages/helm/${encodeURIComponent(repo)}/${encodeURIComponent(chart)}`,
       { timeout: 10_000 },
     );
-    /* DEBUG: show raw first entries */
-    console.log(
-      `[vers-raw] count=${(data.available_versions||[]).length}, sample=`,
-      JSON.stringify(data.available_versions.slice(0,3), null, 2)
-    );
+
     const versions = (data.available_versions || [])
       .slice(0, +limit)
-      .map(v => ({ version: v.version, date: v.created_at || null }));
-    console.log(`[vers] returning ${versions.length} versions`);
+      .map(v => ({
+        version: v.version,
+        date   : v.created_at || null,
+      }));
+
+    /* ─── DEBUG: print count + first item ───────────────────── */
+    console.log(
+      `[vers] got ${versions.length} versions` +
+      (versions.length ? ` – first: ${JSON.stringify(versions[0])}` : ""),
+    );
+
     res.json(versions);
   } catch (e) {
     console.warn("[ArtHub] versions error:", e.message);
@@ -181,13 +192,13 @@ app.get("/api/chart/values", async (req, res) => {
 });
 
 /* ════════════════════════════════════════════════════════════════
-   5.  YAML-Δ preview (unchanged)                              */
+   5.  YAML-Δ preview (override-only)
+   ═══════════════════════════════════════════════════════════════ */
 app.post("/api/delta", (req, res) => {
   const { defaultYaml = "", userYaml = "" } = req.body || {};
   const delta = deltaYaml(defaultYaml, userYaml);
   res.type("text/yaml").send(delta);
 });
-
 
 /* ════════════════════════════════════════════════════════════════
    6.  Webhook proxies  (install / delete / upgrade)
@@ -246,5 +257,6 @@ app.post("/api/download", async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
 /* ────────── go! ──────────────────────────────────────────────── */
 app.listen(cfg.port, () => console.log(`✔︎ backend listening on ${cfg.port}`));
