@@ -172,7 +172,7 @@ export default function ValuesEditor({ chart, onBack }) {
   /* ── main action (install / download) –– now sends OWNER ───── */
   async function deploy(deltaOverride) {
     const deltaStr =
-      deltaOverride ?? (preview?.delta || "").trim() || "# (no overrides)";
+      (deltaOverride ?? (preview?.delta || "").trim()) || "# (no overrides)";    
     const endpoint = downloadOnly ? "/api/download" : "/api/apps";
 
     const payloadBase = {
