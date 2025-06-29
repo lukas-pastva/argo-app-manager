@@ -28,13 +28,11 @@ const ARTHUB_BASE          = "https://artifacthub.io/api/v1";
 /* ───────── express bootstrap ────────────────────────────────── */
 const app = express();
 
-/* tiny console log for every request */
-app.use((req, _res, next) => {
+app.use((req, _res, next) => {           // tiny request log
   console.log(`[REQ] ${req.method} ${req.url}`);
   next();
 });
 
-/* CSP tweaks: allow `data:` URLs (Monaco select chevron) */
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -52,9 +50,9 @@ app.use(
 
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static("public"));
-app.get("/favicon.ico", (_q, r) => r.status(204).end());          // silence 404s
+app.get("/favicon.ico", (_q, r) => r.status(204).end());   // silence 404s
 
-/* ────────── clone (or pull) repo once on boot ────────────────── */
+/* ────────── clone (or pull) repo once on boot ──────────────── */
 let gitRoot = "";
 ensureRepo()
   .then(dir => {
@@ -62,12 +60,6 @@ ensureRepo()
     console.log("[BOOT] Git repo cloned →", dir);
   })
   .catch(err => console.error("❌  Git clone failed:", err));
-
-/* ════════════════════════════════════════════════════════════════
-   6.  Webhook proxies  (install / delete / upgrade / download)
-
-   (other endpoints unchanged for brevity)
-   ═══════════════════════════════════════════════════════════════ */
 
 /* ════════════════════════════════════════════════════════════════
    1.  List app-of-apps YAML files (for the sidebar)
@@ -95,12 +87,51 @@ app.get("/api/apps", async (req, res) => {
 });
 
 /* ════════════════════════════════════════════════════════════════
-   3.  Read chart defaults + override values from the repo
-   (unchanged)
+   3.  Read chart defaults + override values
    ═══════════════════════════════════════════════════════════════ */
+app.get("/api/app/values", async (req, res) => {
+  const { name, file: yamlFile, path: chartPath } = req.query;
+
+  if (!name || !yamlFile || !chartPath)
+    return res.status(400).json({ error: "name, file & path required" });
+
+  const overrideFile = path.join(
+    path.dirname(yamlFile),
+    VALUES_SUBDIR,
+    `${name}.yaml`,
+  );
+  const chartDir  = path.join(gitRoot, CHARTS_ROOT, chartPath);
+  const safeRead  = p => fs.readFile(p, "utf8").catch(() => "");
+
+  const defaultVals  = await safeRead(path.join(chartDir, "values.yaml"));
+  const overrideVals = await safeRead(overrideFile);
+
+  /* mini-meta from Chart.yaml – optional */
+  let meta = {};
+  try {
+    const c = yaml.load(await safeRead(path.join(chartDir, "Chart.yaml"))) || {};
+    meta = {
+      description : c.description || "",
+      home        : c.home        || "",
+      maintainers : (c.maintainers || []).map(m => m.name).filter(Boolean),
+    };
+  } catch {/* ignore */}
+
+  console.log(
+    `[vals-file] ${name}\n` +
+    `           override: ${overrideVals ? "✔︎" : "✖︎"} → ${overrideFile}\n` +
+    `           default : ${defaultVals ? "✔︎" : "✖︎"} → ${chartDir}/values.yaml`,
+  );
+
+  res.json({
+    defaultValues  : defaultVals,
+    overrideValues : overrideVals,
+    meta,
+  });
+});
 
 /* ════════════════════════════════════════════════════════════════
-   4.  Artifact Hub helpers (versions & default values)
+   4.  Artifact Hub helpers
    ═══════════════════════════════════════════════════════════════ */
 
 /* 4-a  list chart versions **with release dates** */
@@ -116,7 +147,7 @@ app.get("/api/chart/versions", async (req, res) => {
       `${ARTHUB_BASE}/packages/helm/${encodeURIComponent(repo)}/${encodeURIComponent(chart)}`,
       { timeout: 10_000 },
     );
-    /*  Each entry →  { version, date }  */
+    /* ← CHANGE: include created_at → {version, date} */
     res.json(
       (data.available_versions || [])
         .slice(0, +limit)
@@ -131,15 +162,37 @@ app.get("/api/chart/versions", async (req, res) => {
   }
 });
 
-/* 4-b  fetch raw values.yaml
-   (unchanged)
-   ═══════════════════════════════════════════════════════════════ */
+/* 4-b  fetch raw values.yaml for a given pkgId+version */
+app.get("/api/chart/values", async (req, res) => {
+  const { pkgId, version } = req.query;
+  if (!pkgId || !version)
+    return res.status(400).json({ error: "pkgId & version required" });
 
-/* 5. YAML-Δ preview
-   (unchanged)
-   ═══════════════════════════════════════════════════════════════ */
+  console.log(`[vals-api] pkgId=${pkgId} ver=${version}`);
 
-/* 6. Webhook proxies
+  try {
+    const { data } = await axios.get(
+      `${ARTHUB_BASE}/packages/${pkgId}/${version}/values`,
+      { timeout: 10_000, responseType: "text" },
+    );
+    res.type("text/yaml").send(data);
+  } catch (e) {
+    console.warn("[ArtHub] values error:", e.message);
+    res.type("text/yaml").send("# (no default values found)");
+  }
+});
+
+/* ════════════════════════════════════════════════════════════════
+   5.  YAML-Δ preview
+   ═══════════════════════════════════════════════════════════════ */
+app.post("/api/delta", (req, res) => {
+  const { defaultYaml = "", userYaml = "" } = req.body || {};
+  const delta = deltaYaml(defaultYaml, userYaml);
+  res.type("text/yaml").send(delta);
+});
+
+/* ════════════════════════════════════════════════════════════════
+   6.  Webhook proxies (install / delete / upgrade / download)
    (unchanged)
    ═══════════════════════════════════════════════════════════════ */
 
