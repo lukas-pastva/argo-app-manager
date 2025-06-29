@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #───────────────────────────────────────────────────────────────────────────────
-#  install.sh   –   v2.9  (robust yq filter)
+#  install.sh   –   v2.10  (owner-aware chart cache layout)
 #───────────────────────────────────────────────────────────────────────────────
 set -Eeuo pipefail
 [[ ${DEBUG:-false} == "true" ]] && set -x
@@ -20,6 +20,13 @@ var_namespace="{{inputs.parameters.var_namespace}}"
 var_repo="{{inputs.parameters.var_repo}}"
 var_userValuesYaml="{{inputs.parameters.var_userValuesYaml}}"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Derive the repo “owner” — the bit after the last “/” of var_repo
+#   https://charts.bitnami.com/bitnami   → bitnami
+#   oci://ghcr.io/my-org                → my-org
+# ─────────────────────────────────────────────────────────────────────────────
+var_owner="$(basename "${var_repo%/}")"
+
 for p in var_release var_name var_chart var_version var_namespace var_repo \
          var_userValuesYaml; do
   [[ ${!p} =~ \{\{.*\}\} ]] && { log "🚫  $p not substituted – abort"; exit 1; }
@@ -31,6 +38,7 @@ log "    • name(app)  = ${var_name}"
 log "    • namespace  = ${var_namespace}"
 log "    • chart      = ${var_chart}@${var_version}"
 log "    • helm repo  = ${var_repo}"
+log "    • owner      = ${var_owner}"
 log "    • values     = $(printf '%s' "${var_userValuesYaml}" | wc -c) bytes"
 
 ###############################################################################
@@ -55,7 +63,7 @@ PUSH_BRANCH="${PUSH_BRANCH:-main}"
 
 apps_file="${APPS_DIR}/${APP_FILE_NAME}"
 values_file="${VALUES_SUBDIR}/${var_release}.yml"
-chart_path="${CHARTS_ROOT}/${var_chart}/${var_chart}/${var_version}"
+chart_path="${CHARTS_ROOT}/${var_owner}/${var_chart}/${var_version}"
 
 log "📁  Paths:"
 log "    • apps_file   = ${apps_file}"
@@ -122,7 +130,7 @@ command -v yq >/dev/null || { log "❌  yq v4 required"; exit 1; }
 log "🛠  yq version: $(yq --version)"
 
 export VAR_NAME="${var_name}"
-export CHART_PATH="${chart_path}"
+export CHART_PATH="${var_owner}/${var_chart}/${var_version}"
 export GITOPS_REPO
 
 yq_filter='.appProjects = (.appProjects // []) |

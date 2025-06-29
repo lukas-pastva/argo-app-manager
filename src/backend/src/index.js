@@ -64,6 +64,9 @@ ensureRepo()
   .catch(err => console.error("❌  Git clone failed:", err));
 
 /* ════════════════════════════════════════════════════════════════
+   6.  Webhook proxies  (install / delete / upgrade / download)
+
+/* ════════════════════════════════════════════════════════════════
    1.  List app-of-apps YAML files (for the sidebar)
    ═══════════════════════════════════════════════════════════════ */
 app.get("/api/files", async (_req, res) => {
@@ -231,13 +234,13 @@ app.post("/api/upgrade", async (req, res) => {
   }
 });
 
-/* 6-e  download chart (pull only – no Application created) */
+/* 6-e  download chart (pull only – no Application created)         */
 app.post("/api/download", async (req, res) => {
   console.log("[download] Download request body:",
               JSON.stringify(req.body, null, 2));
 
   try {
-    await triggerDownloadWebhook(req.body);   // helm pull
+    await triggerDownloadWebhook(req.body);       // helm pull
     res.json({ ok: true });
   } catch (e) {
     console.error("[download] webhook error:", e.message);
