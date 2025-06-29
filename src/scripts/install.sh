@@ -19,13 +19,7 @@ var_version="{{inputs.parameters.var_version}}"
 var_namespace="{{inputs.parameters.var_namespace}}"
 var_repo="{{inputs.parameters.var_repo}}"
 var_userValuesYaml="{{inputs.parameters.var_userValuesYaml}}"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Derive the repo “owner” — the bit after the last “/” of var_repo
-#   https://charts.bitnami.com/bitnami   → bitnami
-#   oci://ghcr.io/my-org                → my-org
-# ─────────────────────────────────────────────────────────────────────────────
-var_owner="$(basename "${var_repo%/}")"
+var_owner="{{inputs.parameters.var_owner}}"
 
 for p in var_release var_name var_chart var_version var_namespace var_repo \
          var_userValuesYaml; do
@@ -58,12 +52,11 @@ log "🌐  GitOps repo: $GITOPS_REPO"
 APPS_DIR="${APPS_DIR:-.}"
 APP_FILE_NAME="${APP_FILE_NAME:-app-of-apps.yaml}"
 VALUES_SUBDIR="${VALUES_SUBDIR:-values}"
-CHARTS_ROOT="charts/external"
 PUSH_BRANCH="${PUSH_BRANCH:-main}"
 
 apps_file="${APPS_DIR}/${APP_FILE_NAME}"
 values_file="${VALUES_SUBDIR}/${var_release}.yml"
-chart_path="${CHARTS_ROOT}/${var_owner}/${var_chart}/${var_version}"
+chart_path="charts/external/${var_owner}/${var_chart}/${var_version}"
 
 log "📁  Paths:"
 log "    • apps_file   = ${apps_file}"
