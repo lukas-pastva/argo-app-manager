@@ -43,18 +43,18 @@ export default function ValuesEditor({ chart, onBack }) {
   const [ver, setVer]       = useState("");
   const [initVals, setInit] = useState("");
   const [ns, setNs]         = useState(chart.name);
-  const [name, setName]     = useState(chart.name);     // Application / release name
+  const [name, setName]     = useState(chart.name);   // Application / release
   const [busy, setBusy]     = useState(true);
-  const [preview, setPre]   = useState(null);
+  const [preview, setPre]   = useState(null);         // null ⇢ no preview modal
   const [downloadOnly, setDL]= useState(false);
-  const [full, setFull]     = useState(false);
+  const [full, setFull]     = useState(false);        // full-screen editor?
 
   /* ── refs ─────────────────────────────────────────────────── */
-  const edDivRef = useRef(null);
-  const edRef    = useRef(null);
-  const ymlRef   = useRef("");
+  const edDivRef = useRef(null);    // DOM node for inline editor
+  const edRef    = useRef(null);    // Monaco instance for inline editor
+  const ymlRef   = useRef("");      // latest YAML text (shared)
 
-  /* ① version list (owner = chart.repoName) ------------------- */
+  /* ① version list ------------------------------------------- */
   useFetch(
     `/api/chart/versions?owner=${encodeURIComponent(chart.repoName)}&chart=${encodeURIComponent(chart.name)}`,
     [chart.name, chart.repoName],
@@ -64,10 +64,10 @@ export default function ValuesEditor({ chart, onBack }) {
     },
   );
 
-  /* ② default values for selected version --------------------- */
+  /* ② default values for selected version -------------------- */
   useEffect(() => {
     if (!ver) return;
-    let done = false;
+    let cancelled = false;
 
     (async () => {
       setBusy(true);
@@ -75,13 +75,13 @@ export default function ValuesEditor({ chart, onBack }) {
         const yml = await fetchSmart(
           `/api/chart/values?pkgId=${chart.packageId}&version=${ver}`,
         );
-        if (!done) {
+        if (!cancelled) {
           setInit(yml);
           ymlRef.current = yml;
           setBusy(false);
         }
       } catch {
-        if (!done) {
+        if (!cancelled) {
           const msg = "# (no default values found)";
           setInit(msg);
           ymlRef.current = msg;
@@ -91,11 +91,11 @@ export default function ValuesEditor({ chart, onBack }) {
     })();
 
     return () => {
-      done = true;
+      cancelled = true;
     };
   }, [chart.packageId, ver]);
 
-  /* ③ mount Monaco once --------------------------------------- */
+  /* ③ mount Monaco once -------------------------------------- */
   useEffect(() => {
     if (busy || !edDivRef.current || edRef.current) return;
 
@@ -113,7 +113,23 @@ export default function ValuesEditor({ chart, onBack }) {
     return () => edRef.current?.dispose();
   }, [busy, initVals]);
 
-  /* ── fullscreen helper -------------------------------------- */
+  /* ────────────────────────────────────────────────────────────
+     BUG-FIX: re-paint Monaco when overlays close
+     ────────────────────────────────────────────────────────── */
+  useEffect(() => {
+    if (!preview && edRef.current) {
+      edRef.current.layout();           // preview dialog closed
+    }
+  }, [preview]);
+
+  useEffect(() => {
+    if (!full && edRef.current) {       // left full-screen
+      edRef.current.setValue(ymlRef.current); // sync edits
+      edRef.current.layout();
+    }
+  }, [full]);
+
+  /* ── fullscreen helper ------------------------------------- */
   function FullscreenEditor() {
     const ref = useRef(null);
 
@@ -131,12 +147,17 @@ export default function ValuesEditor({ chart, onBack }) {
         ymlRef.current = e.getValue();
       });
 
+      /* allow quick exit via Esc */
       const esc = (ev) => {
         if (ev.key === "Escape") setFull(false);
       };
       window.addEventListener("keydown", esc);
 
+      /* cleanup: sync to inline editor & refresh */
       return () => {
+        ymlRef.current = e.getValue();
+        edRef.current?.setValue(ymlRef.current);
+        edRef.current?.layout();
         e.dispose();
         window.removeEventListener("keydown", esc);
       };
@@ -158,10 +179,10 @@ export default function ValuesEditor({ chart, onBack }) {
     );
   }
 
-  /* ── Δ preview helper --------------------------------------- */
+  /* ── Δ preview helper -------------------------------------- */
   async function openPreview() {
     if (downloadOnly) {
-      deploy("");
+      deploy("");          // no preview for download-only
       return;
     }
 
@@ -184,7 +205,7 @@ export default function ValuesEditor({ chart, onBack }) {
     }
   }
 
-  /* ── main action (install / download) ------------------------ */
+  /* ── main action (install / download) ----------------------- */
   async function deploy(deltaOverride) {
     const deltaStr =
       (deltaOverride ?? (preview?.delta || "").trim()) || "# (no overrides)";
@@ -199,14 +220,11 @@ export default function ValuesEditor({ chart, onBack }) {
     };
 
     const payload = downloadOnly
-      ? {
-          ...payloadBase,
-          release: name,     // for download workflow
-        }
+      ? { ...payloadBase, release: name }
       : {
           ...payloadBase,
           name,
-          release: name,     // kept for legacy scripts
+          release: name,
           namespace: ns,
           userValuesYaml:
             deltaStr === "# (no overrides)"
@@ -217,7 +235,8 @@ export default function ValuesEditor({ chart, onBack }) {
     setBusy(true);
     await fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json",
+      },
       body: JSON.stringify(payload),
     });
     setBusy(false);
@@ -226,7 +245,7 @@ export default function ValuesEditor({ chart, onBack }) {
     onBack();
   }
 
-  /* ── preview modal ------------------------------------------ */
+  /* ── preview modal ----------------------------------------- */
   function PreviewModal() {
     const mRef = useRef(null);
 
@@ -298,7 +317,7 @@ export default function ValuesEditor({ chart, onBack }) {
     );
   }
 
-  /* ── header helper ------------------------------------------ */
+  /* ── header helper ----------------------------------------- */
   function ChartHeader() {
     return (
       <div
@@ -354,7 +373,7 @@ export default function ValuesEditor({ chart, onBack }) {
     );
   }
 
-  /* ── render -------------------------------------------------- */
+  /* ── render ------------------------------------------------- */
   return (
     <>
       {preview && <PreviewModal />}
