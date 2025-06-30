@@ -36,7 +36,10 @@ export async function ensureRepo() {
 
 export async function listAppFiles() {
   const dir = await ensureRepo();
-  return fg(cfg.appsGlob, { cwd: dir, absolute: true });
+  console.log(`[DEBUG] Using APPS_GLOB="${cfg.appsGlob}" in ${dir}`);
+  const files = await fg(cfg.appsGlob, { cwd: dir, absolute: true });
+  console.log(`[DEBUG] listAppFiles() found ${files.length} files:`, files);
+  return files;
 }
 
 async function exists(p) {

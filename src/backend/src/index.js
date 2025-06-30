@@ -69,7 +69,9 @@ ensureRepo()
    ═══════════════════════════════════════════════════════════════ */
 app.get("/api/files", async (_req, res) => {
   const files = await listAppFiles();
-  res.json(files.map(p => path.resolve(p)));
+  const resolved = files.map(p => path.resolve(p));
+  console.log("[DEBUG]  /api/files →", resolved);
+  res.json(resolved);
 });
 
 /* ════════════════════════════════════════════════════════════════

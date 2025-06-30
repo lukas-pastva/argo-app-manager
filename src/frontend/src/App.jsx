@@ -20,10 +20,14 @@ export default function App() {
   /* ─── pull tab list once ─────────────────────────────────────── */
   useEffect(() => {
     fetch("/api/files")
-      .then(r=>r.json())
+      .then(r => r.json())
       .then(list => {
+        console.log("[DEBUG] fetched /api/files →", list);
         setFiles(list);
-        if (list.length) setActive(list[0]);
+        if (list.length) {
+          console.log("[DEBUG] defaulting activeFile to", list[0]);
+          setActive(list[0]);
+        }
       });
   }, []);
 
