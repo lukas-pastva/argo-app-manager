@@ -106,12 +106,17 @@ h3{margin:0 0 .8rem;font-size:1.1rem;color:var(--primary);}
              padding:.55rem .9rem;cursor:pointer;}
 .result-item:hover{background:#f1f4f7;}
 [data-theme='dark'] .result-item:hover{background:#242a30;}
+
 /* NEW → clamp logo size */
 .result-item img{
   width:26px;height:26px;border-radius:4px;object-fit:contain;background:#fff;
 }
 
+/* NEW → each <small> starts on its own line */
+.result-item small{display:block;}          /* ← added line */
+
 /* ---------- PROJECT / APP GRID ---------- */
+
 .project-group{
   border:1px solid var(--border);border-radius:10px;padding:1rem 1.25rem;
   margin-bottom:1.5rem;background:var(--card-bg);transition:background .25s;
