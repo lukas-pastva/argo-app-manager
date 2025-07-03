@@ -1,11 +1,10 @@
 /*  ValuesEditor.jsx
     ───────────────────────────────────────────────────────────────
     “Install chart” flow – lets the user
-      ① pick version + namespace + application name
-      ② (optionally) edit values.yaml
-      ③ preview the *override-only* YAML (Δ)
-      ④ install ArgoCD Application          – OR –
-         download chart only (cache-fill)
+      ① pick version
+      ② (optionally) tick “download-only”   ← moved right under version
+      ③ if installing: name + namespace  (hidden when download-only)
+      ④ edit values → Δ preview → install
 */
 
 import React, { useEffect, useRef, useState } from "react";
@@ -30,33 +29,32 @@ function useFetch(url, deps, cb) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 }
-/* pretty YYYY-MM-DD */
 const fmtDate = iso => {
   if (!iso) return "";
   const d = new Date(iso);
   return isNaN(d) ? "" : d.toISOString().slice(0, 10);
 };
 
-/* ── component ───────────────────────────────────────────────── */
-export default function ValuesEditor({ chart, onBack }) {
+/* ─────────────────────────────────────────────────────────────── */
 
+export default function ValuesEditor({ chart, onBack }) {
   /* state */
-  const [versions, setVers] = useState([]);     // [{version,date}, …]
-  const [ver, setVer]       = useState("");
-  const [initVals, setInit] = useState("");
-  const [ns, setNs]         = useState(chart.name);
-  const [name, setName]     = useState(chart.name);
-  const [busy, setBusy]     = useState(true);
-  const [preview, setPre]   = useState(null);   // { delta } | null
-  const [downloadOnly, setDL]= useState(false);
-  const [full, setFull]     = useState(false);  // full-screen editor open?
+  const [versions, setVers]   = useState([]);     // [{version,date}, …]
+  const [ver, setVer]         = useState("");
+  const [initVals, setInit]   = useState("");
+  const [ns, setNs]           = useState(chart.name);
+  const [name, setName]       = useState(chart.name);
+  const [busy, setBusy]       = useState(true);
+  const [preview, setPre]     = useState(null);   // { delta } | null
+  const [downloadOnly, setDL] = useState(false);  // ⬅ NEW: hide inputs
+  const [full, setFull]       = useState(false);  // full-screen editor?
 
   /* refs */
-  const edDivRef = useRef(null);   // inline editor DOM node
-  const edRef    = useRef(null);   // Monaco instance (inline)
-  const ymlRef   = useRef("");     // current YAML text
+  const edDivRef = useRef(null);
+  const edRef    = useRef(null);
+  const ymlRef   = useRef("");
 
-  /* ① fetch versions (owner = repoName, now with dates) -------- */
+  /* ① fetch versions (now with release dates) ------------------ */
   useFetch(
     `/api/chart/versions?owner=${encodeURIComponent(chart.repoName)}&chart=${encodeURIComponent(chart.name)}`,
     [chart.name, chart.repoName],
@@ -111,15 +109,10 @@ export default function ValuesEditor({ chart, onBack }) {
   /* ────────────────────────────────────────────────────────────
      BUG-FIX: re-paint Monaco when overlays close
      ────────────────────────────────────────────────────────── */
+  useEffect(() => { if (!preview && edRef.current) edRef.current.layout(); }, [preview]);
   useEffect(() => {
-    if (!preview && edRef.current) {
-      edRef.current.layout();           // preview dialog closed
-    }
-  }, [preview]);
-
-  useEffect(() => {
-    if (!full && edRef.current) {       // left full-screen
-      edRef.current.setValue(ymlRef.current); // sync edits
+    if (!full && edRef.current) {
+      edRef.current.setValue(ymlRef.current);
       edRef.current.layout();
     }
   }, [full]);
@@ -127,25 +120,21 @@ export default function ValuesEditor({ chart, onBack }) {
   /* ── full-screen editor helper ─────────────────────────────── */
   function FullscreenEditor() {
     const ref = useRef(null);
-
     useEffect(() => {
       if (!ref.current) return;
-
       const e = monaco.editor.create(ref.current, {
         value: ymlRef.current,
         language: "yaml",
         automaticLayout: true,
         minimap: { enabled: false },
       });
-      e.onDidChangeModelContent(() => {
-        ymlRef.current = e.getValue();
-      });
+      e.onDidChangeModelContent(() => { ymlRef.current = e.getValue(); });
 
       const esc = ev => { if (ev.key === "Escape") setFull(false); };
       window.addEventListener("keydown", esc);
 
       return () => {
-        ymlRef.current = e.getValue();            // sync back
+        ymlRef.current = e.getValue();
         edRef.current?.setValue(ymlRef.current);
         edRef.current?.layout();
         e.dispose();
@@ -160,9 +149,7 @@ export default function ValuesEditor({ chart, onBack }) {
           style={{ width: "90vw", height: "90vh", padding: 0 }}
           onClick={e => e.stopPropagation()}
         >
-          <button className="modal-close" onClick={() => setFull(false)}>
-            ×
-          </button>
+          <button className="modal-close" onClick={() => setFull(false)}>×</button>
           <div ref={ref} style={{ width: "100%", height: "100%" }} />
         </div>
       </div>
@@ -171,8 +158,7 @@ export default function ValuesEditor({ chart, onBack }) {
 
   /* ── delta-preview helper ------------------------------------ */
   async function openPreview() {
-    if (downloadOnly) { deploy(""); return; }
-
+    if (downloadOnly) { deploy(""); return; }     // no Δ preview in DL-only
     setBusy(true);
     try {
       const delta = await fetchSmart("/api/delta", {
@@ -204,13 +190,14 @@ export default function ValuesEditor({ chart, onBack }) {
       repo   : chart.repoURL,
       owner  : chart.repoName,
     };
+    const rel = name.trim() || chart.name;        // auto-fallback
 
     const payload = downloadOnly
-      ? { ...base, release: name }
+      ? { ...base, release: rel }
       : {
           ...base,
-          name,
-          release: name,
+          name: rel,
+          release: rel,
           namespace: ns,
           userValuesYaml:
             deltaStr === "# (no overrides)"
@@ -233,7 +220,6 @@ export default function ValuesEditor({ chart, onBack }) {
   /* ── preview modal ------------------------------------------ */
   function PreviewModal() {
     const mRef = useRef(null);
-
     useEffect(() => {
       if (!mRef.current) return;
       const e = monaco.editor.create(mRef.current, {
@@ -253,9 +239,7 @@ export default function ValuesEditor({ chart, onBack }) {
           style={{ width: "64vw", maxWidth: 900 }}
           onClick={e => e.stopPropagation()}
         >
-          <button className="modal-close" onClick={() => setPre(null)}>
-            ×
-          </button>
+          <button className="modal-close" onClick={() => setPre(null)}>×</button>
           <h2 style={{ margin: "0 0 .5rem" }}>Override values preview</h2>
           <p style={{ margin: "0 0 1rem", fontSize: ".85rem", color: "var(--text-light)" }}>
             Only the keys that differ from chart defaults will be saved.
@@ -315,7 +299,7 @@ export default function ValuesEditor({ chart, onBack }) {
       <button className="btn-secondary btn-back" onClick={onBack}>← Back</button>
       <ChartHeader />
 
-      {/* version dropdown with date */}
+      {/* version dropdown */}
       <label>Version</label>
       {versions.length ? (
         <select value={ver} onChange={e => setVer(e.target.value)}>
@@ -329,33 +313,37 @@ export default function ValuesEditor({ chart, onBack }) {
         <em>no versions found</em>
       )}
 
-      {/* application / namespace inputs */}
-      <label style={{ marginTop: "1rem" }}>Application name</label>
-      <input
-        value={name}
-        onChange={e => setName(e.target.value)}
-        style={{ width: "100%", padding: ".55rem .8rem", fontSize: ".95rem" }}
-      />
-
-      <label style={{ marginTop: "1rem" }}>Namespace</label>
-      <input
-        value={ns}
-        onChange={e => setNs(e.target.value)}
-        style={{ width: "100%", padding: ".55rem .8rem", fontSize: ".95rem" }}
-      />
-
-      {/* download-only checkbox */}
-      <label style={{ marginTop: "1.2rem", display: "flex", gap: ".5rem" }}>
+      {/* download-only checkbox (just under version) */}
+      <label style={{ marginTop: "0.8rem", display: "flex", gap: ".5rem" }}>
         <input
           type="checkbox"
           checked={downloadOnly}
           onChange={e => setDL(e.target.checked)}
           style={{ transform: "translateY(2px)" }}
         />
-        <span>I want only to download this Helm chart (do not install)</span>
+        <span>I only want to download this Helm chart (do not install)</span>
       </label>
 
-      {/* values editor (inline) */}
+      {/* name & namespace are **not** required in download-only mode */}
+      {!downloadOnly && (
+        <>
+          <label style={{ marginTop: "1rem" }}>Application name</label>
+          <input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            style={{ width: "100%", padding: ".55rem .8rem", fontSize: ".95rem" }}
+          />
+
+          <label style={{ marginTop: "1rem" }}>Namespace</label>
+          <input
+            value={ns}
+            onChange={e => setNs(e.target.value)}
+            style={{ width: "100%", padding: ".55rem .8rem", fontSize: ".95rem" }}
+          />
+        </>
+      )}
+
+      {/* values editor (hidden in download-only mode) */}
       {!downloadOnly && (
         busy ? (
           <div className="editor-placeholder"><Spinner size={36} /></div>
@@ -378,7 +366,7 @@ export default function ValuesEditor({ chart, onBack }) {
       <button
         className="btn"
         onClick={openPreview}
-        disabled={busy || !ver || !name || !ns}
+        disabled={busy || !ver || (!downloadOnly && (!name || !ns))}
       >
         {busy ? "Working…" : downloadOnly ? "Download chart" : "Install"}
       </button>

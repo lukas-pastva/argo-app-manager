@@ -1,3 +1,4 @@
+/* … existing styles up to “NEW STYLES FOR EDIT VALUES BUTTON” … */
 /* ---------- THEME TOKENS ---------- */
 :root {
   --bg:            #f7f9fb;
@@ -213,3 +214,10 @@ body.modal-open{overflow:hidden;}
   font-size:.8rem;
   line-height:1.1;
 }
+
+/* ────────────────────────────────────────────────────────────────
+   UTILITIES  (NEW)
+   ────────────────────────────────────────────────────────────── */
+
+.text-light{ color: var(--text-light); }
+.truncate{  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
