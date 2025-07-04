@@ -25,6 +25,29 @@ export const CHARTS_ROOT   = process.env.CHARTS_ROOT   || "charts";
 export const VALUES_SUBDIR = process.env.VALUES_SUBDIR || "values";
 const ARTHUB_BASE          = "https://artifacthub.io/api/v1";
 
+/* ───────── globals ───────────────────────────────────────────── */
+let gitRoot      = "";
+let installStyle = "name";           // "name" | "trio"  (auto-detected)
+
+/* ───────── helper – detect style once after clone ───────────── */
+async function detectStyle() {
+  try {
+    const files = await listAppFiles();
+    if (!files.length) return;
+
+    const doc    = yaml.load(await fs.readFile(files[0], "utf8")) ?? {};
+    const firstP = (doc.appProjects || [])[0] || {};
+    const firstA = (firstP.applications || [])[0] || {};
+
+    installStyle =
+      firstA.applicationCode && !firstA.name ? "trio" : "name";
+
+    console.log(`[BOOT] Detected installStyle = "${installStyle}"`);
+  } catch (e) {
+    console.warn("[BOOT] Could not auto-detect style – defaulting to 'name'");
+  }
+}
+
 /* ───────── express bootstrap ────────────────────────────────── */
 const app = express();
 
@@ -53,13 +76,18 @@ app.use(express.static("public"));
 app.get("/favicon.ico", (_q, r) => r.status(204).end());
 
 /* ────────── clone repo once on boot ──────────────────────────── */
-let gitRoot = "";
 ensureRepo()
-  .then(dir => {
+  .then(async dir => {
     gitRoot = dir;
     console.log("[BOOT] Git repo cloned →", dir);
+    await detectStyle();
   })
   .catch(err => console.error("❌  Git clone failed:", err));
+
+/* ════════════════════════════════════════════════════════════════
+   NEW → 0.  Expose detected style
+   ═══════════════════════════════════════════════════════════════ */
+app.get("/api/install-style", (_q, r) => r.json({ style: installStyle }));
 
 /* ════════════════════════════════════════════════════════════════
    1.  List app-of-apps YAML files (sidebar)
@@ -70,8 +98,7 @@ app.get("/api/files", async (_req, res) => {
 });
 
 /* ════════════════════════════════════════════════════════════════
-   2.  Flatten `appProjects[].applications[]`
-       – **namespace is mandatory**
+   2.  Flatten `appProjects[].applications[]`  – namespace required
    ═══════════════════════════════════════════════════════════════ */
 app.get("/api/apps", async (req, res) => {
   const targets = req.query.file ? [req.query.file] : await listAppFiles();
@@ -80,7 +107,7 @@ app.get("/api/apps", async (req, res) => {
   for (const f of targets) {
     const doc = yaml.load(await fs.readFile(f, "utf8")) ?? {};
     (doc.appProjects || []).forEach(p => {
-      if (!p.namespace) return;                // skip invalid items
+      if (!p.namespace) return;
       (p.applications || []).forEach(a =>
         flat.push({ project: p.namespace, file: f, app: a }),
       );
@@ -88,6 +115,7 @@ app.get("/api/apps", async (req, res) => {
   }
   res.json(flat);
 });
+
 
 /* ════════════════════════════════════════════════════════════════
    3.  Read chart defaults + override values from the repo
