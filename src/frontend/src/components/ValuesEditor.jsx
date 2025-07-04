@@ -1,10 +1,8 @@
 /*  ValuesEditor.jsx
     ───────────────────────────────────────────────────────────────
-    “Install chart” flow – lets the user
-      ① pick version
-      ② (optionally) tick “download-only”   ← moved right under version
-      ③ if installing: name + namespace  (hidden when download-only)
-      ④ edit values → Δ preview → install
+    “Install chart” flow – works with either
+      • external charts  → 1-field  (name)
+      • internal charts  → 3-fields (team, env, applicationCode)
 */
 
 import React, { useEffect, useRef, useState } from "react";
@@ -38,30 +36,40 @@ const fmtDate = iso => {
 /* ─────────────────────────────────────────────────────────────── */
 
 export default function ValuesEditor({ chart, onBack }) {
-  /* state */
-  const [versions, setVers]   = useState([]);     // [{version,date}, …]
-  const [ver, setVer]         = useState("");
-  const [initVals, setInit]   = useState("");
-  const [ns, setNs]           = useState(chart.name);
-  const [name, setName]       = useState(chart.name);
-  const [busy, setBusy]       = useState(true);
-  const [preview, setPre]     = useState(null);   // { delta } | null
-  const [downloadOnly, setDL] = useState(false);  // ⬅ NEW: hide inputs
-  const [full, setFull]       = useState(false);  // full-screen editor?
+  /* ── 0.  Style selector  (name vs trio) ────────────────────── */
+  const [style, setStyle] = useState("name");   // "name" | "trio"
 
-  /* refs */
+  /* ── 1.  Chart & versions ----------------------------------- */
+  const [versions, setVers] = useState([]);     // [{version,date}, …]
+  const [ver, setVer]       = useState("");
+
+  /* ── 2.  Values (defaults / editor) -------------------------- */
+  const [initVals, setInit] = useState("");
+  const [busy, setBusy]     = useState(true);
+
+  /* ── 3.  Form inputs ---------------------------------------- */
+  const [name, setName]     = useState(chart.name);   // style ="name"
+  const [team, setTeam]     = useState("");           // style ="trio"
+  const [env, setEnv]       = useState("");
+  const [appCode, setACode] = useState("");
+
+  const [preview, setPre]   = useState(null);   // { delta } | null
+  const [downloadOnly, setDL] = useState(false);
+  const [full, setFull]       = useState(false); // full-screen editor?
+
+  /* ── 4.  Monaco refs ---------------------------------------- */
   const edDivRef = useRef(null);
   const edRef    = useRef(null);
   const ymlRef   = useRef("");
 
-  /* ① fetch versions (now with release dates) ------------------ */
+  /* ── 5-a  fetch chart versions ------------------------------ */
   useFetch(
     `/api/chart/versions?owner=${encodeURIComponent(chart.repoName)}&chart=${encodeURIComponent(chart.name)}`,
     [chart.name, chart.repoName],
     (arr = []) => { setVers(arr); setVer(arr[0]?.version || ""); }
   );
 
-  /* ② fetch default values for selected version ---------------- */
+  /* ── 5-b  fetch default values for selected version --------- */
   useEffect(() => {
     if (!ver) return;
     let cancelled = false;
@@ -90,15 +98,15 @@ export default function ValuesEditor({ chart, onBack }) {
     return () => { cancelled = true; };
   }, [chart.packageId, ver]);
 
-  /* ③ mount inline Monaco once -------------------------------- */
+  /* ── 6.  Mount inline Monaco once --------------------------- */
   useEffect(() => {
     if (busy || !edDivRef.current || edRef.current) return;
 
     edRef.current = monaco.editor.create(edDivRef.current, {
-      value: initVals,
-      language: "yaml",
-      automaticLayout: true,
-      minimap: { enabled: false },
+      value           : initVals,
+      language        : "yaml",
+      automaticLayout : true,
+      minimap         : { enabled: false },
     });
     edRef.current.onDidChangeModelContent(() => {
       ymlRef.current = edRef.current.getValue();
@@ -106,9 +114,7 @@ export default function ValuesEditor({ chart, onBack }) {
     return () => edRef.current?.dispose();
   }, [busy, initVals]);
 
-  /* ────────────────────────────────────────────────────────────
-     BUG-FIX: re-paint Monaco when overlays close
-     ────────────────────────────────────────────────────────── */
+  /*  small fix – layout Monaco when overlays close ------------ */
   useEffect(() => { if (!preview && edRef.current) edRef.current.layout(); }, [preview]);
   useEffect(() => {
     if (!full && edRef.current) {
@@ -117,16 +123,16 @@ export default function ValuesEditor({ chart, onBack }) {
     }
   }, [full]);
 
-  /* ── full-screen editor helper ─────────────────────────────── */
+  /* ── 7.  Full-screen helper -------------------------------- */
   function FullscreenEditor() {
     const ref = useRef(null);
     useEffect(() => {
       if (!ref.current) return;
       const e = monaco.editor.create(ref.current, {
-        value: ymlRef.current,
-        language: "yaml",
-        automaticLayout: true,
-        minimap: { enabled: false },
+        value           : ymlRef.current,
+        language        : "yaml",
+        automaticLayout : true,
+        minimap         : { enabled: false },
       });
       e.onDidChangeModelContent(() => { ymlRef.current = e.getValue(); });
 
@@ -156,17 +162,17 @@ export default function ValuesEditor({ chart, onBack }) {
     );
   }
 
-  /* ── delta-preview helper ------------------------------------ */
+  /* ── 8.  Δ-preview helper ---------------------------------- */
   async function openPreview() {
-    if (downloadOnly) { deploy(""); return; }     // no Δ preview in DL-only
+    if (downloadOnly) { deploy(""); return; }   // skip preview in DL-only
     setBusy(true);
     try {
       const delta = await fetchSmart("/api/delta", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          defaultYaml: initVals,
-          userYaml: ymlRef.current,
+        method  : "POST",
+        headers : { "Content-Type": "application/json" },
+        body    : JSON.stringify({
+          defaultYaml : initVals,
+          userYaml    : ymlRef.current,
         }),
       });
       setPre({ delta });
@@ -178,38 +184,55 @@ export default function ValuesEditor({ chart, onBack }) {
     }
   }
 
-  /* ── main action (install / download) ------------------------ */
+  /* ── 9.  Main action (install / download) ------------------ */
   async function deploy(deltaOverride) {
     const deltaStr =
       (deltaOverride ?? (preview?.delta || "").trim()) || "# (no overrides)";
-    const endpoint = downloadOnly ? "/api/download" : "/api/apps";
 
+    /* 9-a  Decide identifiers & namespace --------------------- */
+    let release, namespace;
+    let extraFields = {};
+
+    if (style === "name") {
+      release   = name.trim() || chart.name;
+      namespace = release;          // UI no longer asks – default rule
+      extraFields = { name: release };
+    } else {
+      release   = appCode.trim();
+      namespace = [team.trim(), env.trim(), appCode.trim()].filter(Boolean).join("-");
+      extraFields = {
+        applicationCode : appCode.trim(),
+        team            : team.trim(),
+        env             : env.trim(),
+      };
+    }
+
+    /* 9-b  Build payload & endpoint --------------------------- */
     const base = {
-      chart  : chart.name,
-      version: ver,
-      repo   : chart.repoURL,
-      owner  : chart.repoName,
+      chart    : chart.name,
+      version  : ver,
+      repo     : chart.repoURL,
+      owner    : chart.repoName,
+      release,
+      namespace,
     };
-    const rel = name.trim() || chart.name;        // auto-fallback
 
     const payload = downloadOnly
-      ? { ...base, release: rel }
-      : {
-          ...base,
-          name: rel,
-          release: rel,
-          namespace: ns,
+      ? { ...base, ...extraFields }                         // DL → no values
+      : { ...base, ...extraFields,
           userValuesYaml:
             deltaStr === "# (no overrides)"
               ? ""
-              : btoa(unescape(encodeURIComponent(deltaStr))),
-        };
+              : btoa(unescape(encodeURIComponent(deltaStr))) };
 
+    const endpoint = downloadOnly ? "/api/download" : "/api/apps";
+
+    /* 9-c  POST ----------------------------------------------- */
     setBusy(true);
     await fetch(endpoint, {
-      method : "POST",
-      headers: { "Content-Type": "application/json" },
-      body   : JSON.stringify(payload),
+      method  : "POST",
+      headers : { "Content-Type": "application/json" },
+      body    : JSON.stringify(payload),
     });
     setBusy(false);
 
@@ -217,17 +240,17 @@ export default function ValuesEditor({ chart, onBack }) {
     onBack();
   }
 
-  /* ── preview modal ------------------------------------------ */
+  /* ── 10.  Preview modal ------------------------------------ */
   function PreviewModal() {
     const mRef = useRef(null);
     useEffect(() => {
       if (!mRef.current) return;
       const e = monaco.editor.create(mRef.current, {
-        value: preview?.delta || "# (no overrides)",
-        language: "yaml",
-        readOnly: true,
-        automaticLayout: true,
-        minimap: { enabled: false },
+        value           : preview?.delta || "# (no overrides)",
+        language        : "yaml",
+        readOnly        : true,
+        automaticLayout : true,
+        minimap         : { enabled: false },
       });
       return () => e.dispose();
     }, []);
@@ -241,14 +264,31 @@ export default function ValuesEditor({ chart, onBack }) {
         >
           <button className="modal-close" onClick={() => setPre(null)}>×</button>
           <h2 style={{ margin: "0 0 .5rem" }}>Override values preview</h2>
-          <p style={{ margin: "0 0 1rem", fontSize: ".85rem", color: "var(--text-light)" }}>
+          <p
+            style={{
+              margin   : "0 0 1rem",
+              fontSize : ".85rem",
+              color    : "var(--text-light)",
+            }}
+          >
             Only the keys that differ from chart defaults will be saved.
           </p>
           <div
             ref={mRef}
-            style={{ height: "50vh", border: "1px solid var(--border)", borderRadius: 6 }}
+            style={{
+              height       : "50vh",
+              border       : "1px solid var(--border)",
+              borderRadius : 6,
+            }}
           />
-          <div style={{ display: "flex", gap: "1rem", justifyContent: "flex-end", marginTop: "1.1rem" }}>
+          <div
+            style={{
+              display       : "flex",
+              gap           : "1rem",
+              justifyContent: "flex-end",
+              marginTop     : "1.1rem",
+            }}
+          >
             <button className="btn-secondary" onClick={() => setPre(null)} disabled={busy}>Back</button>
             <button className="btn" onClick={() => deploy()} disabled={busy}>
               {busy ? "Saving…" : "Install"}
@@ -259,7 +299,7 @@ export default function ValuesEditor({ chart, onBack }) {
     );
   }
 
-  /* ── header helper ------------------------------------------ */
+  /* ── 11.  Header helper ------------------------------------ */
   function ChartHeader() {
     return (
       <div style={{ display: "flex", alignItems: "flex-start", gap: "1rem", marginBottom: "1.1rem" }}>
@@ -268,8 +308,12 @@ export default function ValuesEditor({ chart, onBack }) {
             src={chart.logo}
             alt=""
             style={{
-              width: 48, height: 48, borderRadius: 6,
-              objectFit: "contain", background: "#fff", flexShrink: 0
+              width       : 48,
+              height      : 48,
+              borderRadius: 6,
+              objectFit   : "contain",
+              background  : "#fff",
+              flexShrink  : 0,
             }}
           />
         )}
@@ -290,7 +334,12 @@ export default function ValuesEditor({ chart, onBack }) {
     );
   }
 
-  /* ── render -------------------------------------------------- */
+  /* ── 12.  Render ------------------------------------------- */
+  const allNameFieldsFilled =
+    style === "name"
+      ? Boolean(name.trim())
+      : team.trim() && env.trim() && appCode.trim();
+
   return (
     <>
       {preview && <PreviewModal />}
@@ -299,7 +348,7 @@ export default function ValuesEditor({ chart, onBack }) {
       <button className="btn-secondary btn-back" onClick={onBack}>← Back</button>
       <ChartHeader />
 
-      {/* version dropdown */}
+      {/* ═════════════════ version ════════════════════════ */}
       <label>Version</label>
       {versions.length ? (
         <select value={ver} onChange={e => setVer(e.target.value)}>
@@ -313,8 +362,54 @@ export default function ValuesEditor({ chart, onBack }) {
         <em>no versions found</em>
       )}
 
-      {/* download-only checkbox (just under version) */}
-      <label style={{ marginTop: "0.8rem", display: "flex", gap: ".5rem" }}>
+      {/* ═════════════════ style toggle ═══════════════════ */}
+      <label style={{ marginTop: "1rem" }}>Application style</label>
+      <select value={style} onChange={e => setStyle(e.target.value)}>
+        <option value="name">External (single&nbsp;name)</option>
+        <option value="trio">Internal (team + env + applicationCode)</option>
+      </select>
+
+      {/* ═════════════════ name / trio inputs ═════════════ */}
+      {style === "name" ? (
+        <>
+          <label style={{ marginTop: "1rem" }}>Application name</label>
+          <input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            style={{ width: "100%", padding: ".55rem .8rem", fontSize: ".95rem" }}
+            placeholder="e.g. grafana"
+          />
+        </>
+      ) : (
+        <>
+          <label style={{ marginTop: "1rem" }}>Team</label>
+          <input
+            value={team}
+            onChange={e => setTeam(e.target.value)}
+            style={{ width: "100%", padding: ".55rem .8rem", fontSize: ".95rem" }}
+            placeholder="e.g. alcasys"
+          />
+
+          <label style={{ marginTop: "1rem" }}>Environment</label>
+          <input
+            value={env}
+            onChange={e => setEnv(e.target.value)}
+            style={{ width: "100%", padding: ".55rem .8rem", fontSize: ".95rem" }}
+            placeholder="e.g. ppt"
+          />
+
+          <label style={{ marginTop: "1rem" }}>Application code</label>
+          <input
+            value={appCode}
+            onChange={e => setACode(e.target.value)}
+            style={{ width: "100%", padding: ".55rem .8rem", fontSize: ".95rem" }}
+            placeholder="e.g. wfm"
+          />
+        </>
+      )}
+
+      {/* ═════════════════ download-only toggle ═══════════ */}
+      <label style={{ marginTop: "1rem", display: "flex", gap: ".5rem" }}>
         <input
           type="checkbox"
           checked={downloadOnly}
@@ -324,26 +419,7 @@ export default function ValuesEditor({ chart, onBack }) {
         <span>I only want to download this Helm chart (do not install)</span>
       </label>
 
-      {/* name & namespace are **not** required in download-only mode */}
-      {!downloadOnly && (
-        <>
-          <label style={{ marginTop: "1rem" }}>Application name</label>
-          <input
-            value={name}
-            onChange={e => setName(e.target.value)}
-            style={{ width: "100%", padding: ".55rem .8rem", fontSize: ".95rem" }}
-          />
-
-          <label style={{ marginTop: "1rem" }}>Namespace</label>
-          <input
-            value={ns}
-            onChange={e => setNs(e.target.value)}
-            style={{ width: "100%", padding: ".55rem .8rem", fontSize: ".95rem" }}
-          />
-        </>
-      )}
-
-      {/* values editor (hidden in download-only mode) */}
+      {/* ═════════════════ values editor (hidden for DL-only) ═══ */}
       {!downloadOnly && (
         busy ? (
           <div className="editor-placeholder"><Spinner size={36} /></div>
@@ -362,11 +438,11 @@ export default function ValuesEditor({ chart, onBack }) {
         )
       )}
 
-      {/* primary action */}
+      {/* ═════════════════ primary action ════════════════ */}
       <button
         className="btn"
         onClick={openPreview}
-        disabled={busy || !ver || (!downloadOnly && (!name || !ns))}
+        disabled={busy || !ver || !allNameFieldsFilled}
       >
         {busy ? "Working…" : downloadOnly ? "Download chart" : "Install"}
       </button>

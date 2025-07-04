@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #───────────────────────────────────────────────────────────────────────────────
-#  install.sh   –   v2.11  (owner-aware chart cache layout, namespace key)
+#  install.sh   –   v3.0  (namespace-only + dual app styles)
 #───────────────────────────────────────────────────────────────────────────────
 set -Eeuo pipefail
 [[ ${DEBUG:-false} == "true" ]] && set -x
@@ -10,30 +10,62 @@ trap 'log "❌  FAILED (line $LINENO) 👉 «$BASH_COMMAND»"; exit 1' ERR
 echo -e "\n\e[1;33m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\e[0m"
 
 ###############################################################################
-# 0) Workflow inputs
+# 0) Workflow inputs  (Argo substitutes these before execution)
 ###############################################################################
+# — always present —
 var_release="{{inputs.parameters.var_release}}"
-var_name="{{inputs.parameters.var_name}}"
 var_chart="{{inputs.parameters.var_chart}}"
 var_version="{{inputs.parameters.var_version}}"
 var_namespace="{{inputs.parameters.var_namespace}}"
 var_repo="{{inputs.parameters.var_repo}}"
 var_userValuesYaml="{{inputs.parameters.var_userValuesYaml}}"
+
+# — external charts only —
+var_name="{{inputs.parameters.var_name}}"
 var_owner="{{inputs.parameters.var_owner}}"
 
-for p in var_release var_name var_chart var_version var_namespace var_repo \
-         var_userValuesYaml; do
-  [[ ${!p} =~ \{\{.*\}\} ]] && { log "🚫  $p not substituted – abort"; exit 1; }
-done
+# — internal “trio” style —
+var_applicationCode="{{inputs.parameters.var_applicationCode}}"
+var_team="{{inputs.parameters.var_team}}"
+var_env="{{inputs.parameters.var_env}}"
 
-log "🚀  Request:"
-log "    • release    = ${var_release}"
-log "    • name(app)  = ${var_name}"
-log "    • namespace  = ${var_namespace}"
-log "    • chart      = ${var_chart}@${var_version}"
-log "    • helm repo  = ${var_repo}"
-log "    • owner      = ${var_owner}"
-log "    • values     = $(printf '%s' "${var_userValuesYaml}" | wc -c) bytes"
+# helper – blank-out any value that was NOT substituted by Argo
+unset_if_unsubstituted() {
+  local v="$1"; [[ $v =~ \{\{.*\}\} ]] && echo "" || echo "$v"
+}
+var_name=$(unset_if_unsubstituted "$var_name")
+var_owner=$(unset_if_unsubstituted "$var_owner")
+var_applicationCode=$(unset_if_unsubstituted "$var_applicationCode")
+var_team=$(unset_if_unsubstituted "$var_team")
+var_env=$(unset_if_unsubstituted "$var_env")
+
+# decide which style we’re in ✨
+if [[ -n $var_applicationCode ]]; then
+  STYLE="trio"          # applicationCode / team / env
+else
+  STYLE="name"          # classic “name” style (default)
+fi
+
+# sanity checks ---------------------------------------------------------------
+for p in var_chart var_version var_namespace var_repo var_userValuesYaml; do
+  [[ -z ${!p} ]] && { log "🚫  $p is empty – abort"; exit 1; }
+done
+if [[ $STYLE == "name" && -z $var_name ]]; then
+  log "🚫  STYLE=name but var_name is empty – abort"
+  exit 1
+fi
+
+log "🗒  Detected style: $STYLE"
+if [[ $STYLE == "name" ]]; then
+  log "    • name        = $var_name"
+  log "    • owner       = $var_owner"
+else
+  log "    • team        = $var_team"
+  log "    • env         = $var_env"
+  log "    • appCode     = $var_applicationCode"
+fi
+log "    • namespace   = $var_namespace"
+log "    • chart       = $var_chart@$var_version"
 
 ###############################################################################
 # 1) Mandatory env
@@ -56,7 +88,12 @@ PUSH_BRANCH="${PUSH_BRANCH:-main}"
 
 apps_file="${APPS_DIR}/${APP_FILE_NAME}"
 values_file="${VALUES_SUBDIR}/${var_release}.yaml"
-chart_path="charts/external/${var_owner}/${var_chart}/${var_version}"
+
+if [[ $STYLE == "name" ]]; then
+  chart_path="charts/external/${var_owner}/${var_chart}/${var_version}"
+else
+  chart_path="internal/charts/${var_team}/${var_applicationCode}/${var_version}"
+fi
 
 log "📁  Paths:"
 log "    • apps_file   = ${apps_file}"
@@ -101,7 +138,7 @@ printf '%s\n' "$var_userValuesYaml" > "$values_file"
 log "📝  Values → $values_file"
 
 ###############################################################################
-# 5) Download Helm chart
+# 5) Download / cache Helm chart
 ###############################################################################
 if [[ -d $chart_path ]]; then
   log "📦  Chart already cached → $chart_path"
@@ -117,27 +154,46 @@ else
 fi
 
 ###############################################################################
-# 6) Upsert Application block via yq (v4) – **namespace key**
+# 6) Upsert Application block via yq (v4)
 ###############################################################################
 command -v yq >/dev/null || { log "❌  yq v4 required"; exit 1; }
 log "🛠  yq version: $(yq --version)"
 
-export VAR_NAME="${var_name}"
-export CHART_PATH="external/${var_owner}/${var_chart}/${var_version}"
+export VAR_NAMESPACE="$var_namespace"
+export CHART_PATH="$chart_path"
 export GITOPS_REPO
+export VAR_NAME="$var_name"
+export VAR_APP_CODE="$var_applicationCode"
+export VAR_TEAM="$var_team"
+export VAR_ENV="$var_env"
 
-yq_filter='.appProjects = (.appProjects // []) |
-  (.appProjects) |= map(select(.namespace != env(VAR_NAME))) |
-  .appProjects += [{
-    "namespace": env(VAR_NAME),
-    "applications": [{
-      "name":       env(VAR_NAME),
-      "repoURL":    env(GITOPS_REPO),
-      "path":       env(CHART_PATH),
-      "autoSync":   true,
-      "valueFiles": true
-    }]
-  }]'
+if [[ $STYLE == "name" ]]; then
+  yq_filter='.appProjects = (.appProjects // []) |
+    (.appProjects) |= map(select(.namespace != env(VAR_NAME))) |
+    .appProjects += [{
+      "namespace": env(VAR_NAME),
+      "applications": [{
+        "name"      : env(VAR_NAME),
+        "repoURL"   : env(GITOPS_REPO),
+        "path"      : env(CHART_PATH),
+        "autoSync"  : true,
+        "valueFiles": true
+      }]
+    }]'
+else
+  yq_filter='.appProjects = (.appProjects // []) |
+    (.appProjects) |= map(select(.namespace != env(VAR_NAMESPACE))) |
+    .appProjects += [{
+      "namespace": env(VAR_NAMESPACE),
+      "applications": [{
+        "applicationCode": env(VAR_APP_CODE),
+        "team"           : env(VAR_TEAM),
+        "env"            : env(VAR_ENV),
+        "path"           : env(CHART_PATH),
+        "rbac"           : {}
+      }]
+    }]'
+fi
 
 log "🔧  yq filter: ${yq_filter}"
 yq eval -i "$yq_filter" "$apps_file"
@@ -153,9 +209,14 @@ if git diff --cached --quiet; then
   exit 0
 fi
 
-git commit -m "feat(${var_name}): add/update ${var_chart} ${var_version}"
+if [[ $STYLE == "name" ]]; then
+  commit_id="$var_name"
+else
+  commit_id="$var_applicationCode"
+fi
+git commit -m "feat(${commit_id}): add/update ${var_chart} ${var_version}"
 log "📤  Pushing…"
 git push -u origin "$branch"
 
-log "🎉  Done – Application \e[1m${var_name}\e[0m committed!"
+log "🎉  Done – Application \e[1m${commit_id}\e[0m committed!"
 echo -e "\e[1;32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\e[0m\n"

@@ -62,21 +62,16 @@ ensureRepo()
   .catch(err => console.error("❌  Git clone failed:", err));
 
 /* ════════════════════════════════════════════════════════════════
-   6.  Webhook proxies  (install / delete / upgrade / download)
-
-/* ════════════════════════════════════════════════════════════════
-   1.  List app-of-apps YAML files (for the sidebar)
+   1.  List app-of-apps YAML files (sidebar)
    ═══════════════════════════════════════════════════════════════ */
 app.get("/api/files", async (_req, res) => {
   const files = await listAppFiles();
-  const resolved = files.map(p => path.resolve(p));
-  console.log("[DEBUG]  /api/files →", resolved);
-  res.json(resolved);
+  res.json(files.map(p => path.resolve(p)));
 });
 
 /* ════════════════════════════════════════════════════════════════
    2.  Flatten `appProjects[].applications[]`
-        – now supports both legacy `.name` and new `.namespace`
+       – **namespace is mandatory**
    ═══════════════════════════════════════════════════════════════ */
 app.get("/api/apps", async (req, res) => {
   const targets = req.query.file ? [req.query.file] : await listAppFiles();
@@ -85,9 +80,9 @@ app.get("/api/apps", async (req, res) => {
   for (const f of targets) {
     const doc = yaml.load(await fs.readFile(f, "utf8")) ?? {};
     (doc.appProjects || []).forEach(p => {
-      const projectId = p.namespace ?? p.name ?? "(unknown)";
+      if (!p.namespace) return;                // skip invalid items
       (p.applications || []).forEach(a =>
-        flat.push({ project: projectId, file: f, app: a }),
+        flat.push({ project: p.namespace, file: f, app: a }),
       );
     });
   }

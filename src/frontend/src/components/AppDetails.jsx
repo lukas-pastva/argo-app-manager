@@ -1,7 +1,7 @@
 /*  AppDetails.jsx
     ───────────────────────────────────────────────────────────────
     Modal that shows
-      • chart default values (read-only, never editable)
+      • chart default values (read-only)
       • override values   (view → edit → preview → save/upgrade)
       • optional meta (description / home / maintainers)
 */
@@ -10,7 +10,18 @@ import React, { useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
 import Spinner from "./Spinner.jsx";
 
-/* helper – returns { chart, version } for either source style */
+/* ─── helpers ─────────────────────────────────────────────────── */
+
+/* single canonical id – works for both structures */
+function appId(app = {}) {
+  return (
+    app.name ??
+    app.applicationCode ??
+    [app.team, app.env, app.applicationCode].filter(Boolean).join("-")
+  );
+}
+
+/* returns { chart, version } regardless of style */
 function chartInfo(app) {
   if (app.chart) {
     return { chart: app.chart, version: app.targetRevision || "" };
@@ -19,27 +30,23 @@ function chartInfo(app) {
   return { chart: seg.at(-2) || "", version: seg.at(-1) || "" };
 }
 
-/*──────────────────────────────────────────────────────────────────*/
+/* ─────────────────────────────────────────────────────────────── */
 
 export default function AppDetails({ project, file, app, onClose }) {
   /* state ------------------------------------------------------- */
-  const [vals, setVals] = useState({
-    defaultValues: "",
-    overrideValues: "",
-    meta: {},
-  });
-  const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState(false);
-  const [preview, setPreview] = useState(null); // { delta } | null
-  const [busy, setBusy] = useState(false);
+  const [vals, setVals]     = useState({ defaultValues: "", overrideValues: "", meta: {} });
+  const [loading, setLoad]  = useState(true);
+  const [editing, setEdit]  = useState(false);
+  const [preview, setPrev]  = useState(null); // { delta } | null
+  const [busy, setBusy]     = useState(false);
 
   /* refs -------------------------------------------------------- */
-  const defDivRef = useRef(null); // left-side viewer
-  const ovrDivRef = useRef(null); // right-side view / editor
-  const ovrEdRef = useRef(null);  // Monaco instance (override)
-  const yamlRef  = useRef("");    // live override YAML text
+  const defDivRef = useRef(null);
+  const ovrDivRef = useRef(null);
+  const ovrEdRef  = useRef(null);
+  const yamlRef   = useRef("");
 
-  /* lock body scroll while modal open -------------------------- */
+  /* lock body scroll ------------------------------------------- */
   useEffect(() => {
     document.body.classList.add("modal-open");
     return () => document.body.classList.remove("modal-open");
@@ -50,54 +57,52 @@ export default function AppDetails({ project, file, app, onClose }) {
     const { chart, version } = chartInfo(app);
     const qs = new URLSearchParams({
       project,
-      name: app.name,
+      name   : appId(app),      // ← fallback aware
       chart,
       version,
       repoURL: app.repoURL,
-      path: app.path,
+      path   : app.path,
       file,
     });
 
     fetch(`/api/app/values?${qs.toString()}`)
-      .then((r) => r.json())
-      .then((j) => {
+      .then(r => r.json())
+      .then(j => {
         setVals({
-          defaultValues: j.defaultValues || "",
-          overrideValues: j.overrideValues || "",
-          meta: j.meta || {},
+          defaultValues  : j.defaultValues  || "",
+          overrideValues : j.overrideValues || "",
+          meta           : j.meta           || {},
         });
         yamlRef.current = j.overrideValues || "";
-        setLoading(false);
+        setLoad(false);
       })
-      .catch(() => setLoading(false));
+      .catch(() => setLoad(false));
   }, [project, file, app]);
 
-  /* mount left-hand (default) viewer once data ready ------------ */
+  /* mount left‐hand (defaults) viewer once ready --------------- */
   useEffect(() => {
     if (loading || !defDivRef.current) return;
     const e = monaco.editor.create(defDivRef.current, {
-      value: vals.defaultValues || "# (no values.yaml found)",
-      language: "yaml",
-      readOnly: true,
-      automaticLayout: true,
-      minimap: { enabled: false },
+      value           : vals.defaultValues || "# (no values.yaml found)",
+      language        : "yaml",
+      readOnly        : true,
+      automaticLayout : true,
+      minimap         : { enabled: false },
     });
     return () => e.dispose();
   }, [loading, vals.defaultValues]);
 
-  /* mount / remount right-hand viewer or editable editor -------- */
+  /* mount / remount right‐hand viewer or editor ---------------- */
   useEffect(() => {
     if (loading || !ovrDivRef.current) return;
 
-    // dispose any previous instance first
-    ovrEdRef.current?.dispose();
-
+    ovrEdRef.current?.dispose();      // dispose old instance first
     ovrEdRef.current = monaco.editor.create(ovrDivRef.current, {
-      value: yamlRef.current || "# (no override file)",
-      language: "yaml",
-      readOnly: !editing,
-      automaticLayout: true,
-      minimap: { enabled: false },
+      value           : yamlRef.current || "# (no override file)",
+      language        : "yaml",
+      readOnly        : !editing,
+      automaticLayout : true,
+      minimap         : { enabled: false },
     });
 
     if (editing) {
@@ -114,14 +119,14 @@ export default function AppDetails({ project, file, app, onClose }) {
     setBusy(true);
     try {
       const delta = await fetch("/api/delta", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          defaultYaml: vals.defaultValues,
-          userYaml: yamlRef.current,
+        method  : "POST",
+        headers : { "Content-Type": "application/json" },
+        body    : JSON.stringify({
+          defaultYaml : vals.defaultValues,
+          userYaml    : yamlRef.current,
         }),
-      }).then((r) => r.text());
-      setPreview({ delta });
+      }).then(r => r.text());
+      setPrev({ delta });
     } catch (e) {
       console.error("Δ-preview error:", e);
       alert("Could not compute YAML delta – see console.");
@@ -130,31 +135,32 @@ export default function AppDetails({ project, file, app, onClose }) {
     }
   }
 
-  /* helper – perform helm upgrade via backend ------------------ */
+  /* helper – helm upgrade payload ------------------------------ */
   async function saveUpgrade() {
     setBusy(true);
     const { chart, version } = chartInfo(app);
     const ns = app.destinationNamespace || app.namespace || "default";
+    const releaseName = appId(app);
 
     try {
       await fetch("/api/upgrade", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        method  : "POST",
+        headers : { "Content-Type": "application/json" },
+        body    : JSON.stringify({
           chart,
-          repo: app.repoURL,
+          repo           : app.repoURL,
           version,
-          release: app.name,
-          namespace: ns,
-          userValuesYaml: yamlRef.current,
+          release        : releaseName,
+          namespace      : ns,
+          userValuesYaml : yamlRef.current,
         }),
-      }).then((r) => {
+      }).then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
       });
 
       alert("Upgrade triggered!");
-      setEditing(false);
-      setPreview(null);
+      setEdit(false);
+      setPrev(null);
     } catch (e) {
       console.error("upgrade error:", e);
       alert(`Upgrade failed – ${e.message}`);
@@ -170,25 +176,25 @@ export default function AppDetails({ project, file, app, onClose }) {
     useEffect(() => {
       if (!mRef.current) return;
       const e = monaco.editor.create(mRef.current, {
-        value: preview?.delta || "# (no changes)",
-        language: "yaml",
-        readOnly: true,
-        automaticLayout: true,
-        minimap: { enabled: false },
+        value           : preview?.delta || "# (no changes)",
+        language        : "yaml",
+        readOnly        : true,
+        automaticLayout : true,
+        minimap         : { enabled: false },
       });
       return () => e.dispose();
     }, []);
 
     return (
-      <div className="modal-overlay" onClick={() => setPreview(null)}>
+      <div className="modal-overlay" onClick={() => setPrev(null)}>
         <div
           className="modal-dialog"
           style={{ width: "64vw", maxWidth: 900 }}
-          onClick={(e) => e.stopPropagation()}
+          onClick={e => e.stopPropagation()}
         >
           <button
             className="modal-close"
-            onClick={() => setPreview(null)}
+            onClick={() => setPrev(null)}
             aria-label="close"
           >
             ×
@@ -196,9 +202,9 @@ export default function AppDetails({ project, file, app, onClose }) {
           <h2 style={{ margin: "0 0 .5rem" }}>Override values preview</h2>
           <p
             style={{
-              margin: "0 0 1rem",
-              fontSize: ".85rem",
-              color: "var(--text-light)",
+              margin   : "0 0 1rem",
+              fontSize : ".85rem",
+              color    : "var(--text-light)",
             }}
           >
             Only the keys that differ from chart defaults will be applied.
@@ -206,22 +212,23 @@ export default function AppDetails({ project, file, app, onClose }) {
           <div
             ref={mRef}
             style={{
-              height: "50vh",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
+              height       : "50vh",
+              border       : "1px solid var(--border)",
+              borderRadius : 6,
             }}
           />
           <div
             style={{
-              display: "flex",
-              gap: "1rem",
+              display       : "flex",
+              gap           : "1rem",
               justifyContent: "flex-end",
-              marginTop: "1.1rem",
+              marginTop     : "1.1rem",
             }}
           >
             <button
               className="btn-secondary"
-              onClick={() => setPreview(null)}
+              onClick={() => setPrev(null)}
+              disabled={busy}
             >
               Back
             </button>
@@ -234,7 +241,7 @@ export default function AppDetails({ project, file, app, onClose }) {
     );
   }
 
-  /* tiny component for optional meta box ----------------------- */
+  /* tiny component – optional meta box ------------------------- */
   function Meta() {
     const { description = "", home = "", maintainers = [] } = vals.meta ?? {};
     if (!description && !home && maintainers.length === 0) return null;
@@ -242,12 +249,12 @@ export default function AppDetails({ project, file, app, onClose }) {
     return (
       <div
         style={{
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          padding: "0.9rem 1rem",
-          margin: "1rem 0",
-          background: "var(--card-bg)",
-          color: "var(--text-light)",
+          border       : "1px solid var(--border)",
+          borderRadius : 8,
+          padding      : "0.9rem 1rem",
+          margin       : "1rem 0",
+          background   : "var(--card-bg)",
+          color        : "var(--text-light)",
         }}
       >
         {description && <p style={{ margin: 0 }}>{description}</p>}
@@ -289,14 +296,14 @@ export default function AppDetails({ project, file, app, onClose }) {
       <div
         className="modal-dialog"
         style={{ width: "90vw", maxWidth: 1280 }}
-        onClick={(e) => e.stopPropagation()}
+        onClick={e => e.stopPropagation()}
       >
         <button className="modal-close" onClick={close} aria-label="close">
           ×
         </button>
 
         <h2 style={{ marginTop: 0, marginBottom: ".6rem" }}>
-          {app.name} – <em>{project}</em>
+          {appId(app)} – <em>{project}</em>
         </h2>
 
         <p style={{ margin: 0 }}>
@@ -320,43 +327,43 @@ export default function AppDetails({ project, file, app, onClose }) {
 
             <div
               style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "1rem",
+                display              : "grid",
+                gridTemplateColumns  : "1fr 1fr",
+                gap                  : "1rem",
               }}
             >
-              {/* chart defaults (always read-only) */}
+              {/* chart defaults (left, read-only) */}
               <div>
                 <h3 style={{ margin: "0 0 .4rem" }}>Chart defaults</h3>
                 <p
                   style={{
-                    margin: "0 0 .4rem",
-                    fontSize: ".8rem",
-                    color: "var(--text-light)",
+                    margin    : "0 0 .4rem",
+                    fontSize  : ".8rem",
+                    color     : "var(--text-light)",
                   }}
                 >
-                  This column is static – defaults come directly from the Helm
-                  chart and <strong>cannot</strong> be edited.
+                  This column is static – defaults come from the Helm chart and
+                  <strong> cannot</strong> be edited.
                 </p>
                 <div
                   ref={defDivRef}
                   style={{
-                    height: "48vh",
-                    border: "1px solid var(--border)",
-                    borderRadius: 6,
+                    height       : "48vh",
+                    border       : "1px solid var(--border)",
+                    borderRadius : 6,
                   }}
                 />
               </div>
 
-              {/* override values (view / edit) */}
+              {/* overrides (right) */}
               <div>
                 <h3 style={{ margin: "0 0 .4rem" }}>Override values</h3>
                 {!editing && (
                   <p
                     style={{
-                      margin: "0 0 .4rem",
-                      fontSize: ".8rem",
-                      color: "var(--text-light)",
+                      margin    : "0 0 .4rem",
+                      fontSize  : ".8rem",
+                      color     : "var(--text-light)",
                     }}
                   >
                     These YAML snippets override the defaults on the left using
@@ -364,19 +371,17 @@ export default function AppDetails({ project, file, app, onClose }) {
                   </p>
                 )}
 
-                {/* wrapper allows floating “Edit” button */}
                 <div className="ovr-wrapper">
-                  {/* floating Edit button – only when NOT editing */}
                   {!editing && (
                     <button
                       className="btn-secondary edit-fab"
                       onClick={() => {
                         if (
                           window.confirm(
-                            "Editing override values will trigger a Helm upgrade of this release. Continue?",
+                            "Editing override values will trigger a Helm upgrade of this release. Continue?"
                           )
                         ) {
-                          setEditing(true);
+                          setEdit(true);
                         }
                       }}
                     >
@@ -387,19 +392,18 @@ export default function AppDetails({ project, file, app, onClose }) {
                   <div ref={ovrDivRef} className="editor-frame" />
                 </div>
 
-                {/* action buttons – only while editing */}
                 {editing && (
                   <div
                     style={{
-                      display: "flex",
-                      gap: ".6rem",
-                      marginTop: ".8rem",
+                      display   : "flex",
+                      gap       : ".6rem",
+                      marginTop : ".8rem",
                     }}
                   >
                     <button
                       className="btn-secondary"
                       onClick={() => {
-                        setEditing(false);
+                        setEdit(false);
                         yamlRef.current = vals.overrideValues || "";
                       }}
                       disabled={busy}
