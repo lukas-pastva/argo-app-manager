@@ -162,10 +162,15 @@ select{
 
 /* ---------- SPINNER ---------- */
 @keyframes spin{to{transform:rotate(360deg);}}
-.spinner{
-  width:24px;height:24px;border:3px solid var(--border);
-  border-top-color:var(--primary);border-radius:50%;
-  animation:spin 1s linear infinite;margin:auto;
+.spinner {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: auto;
 }
 
 /* ---------- MODAL ---------- */
@@ -187,18 +192,6 @@ select{
 
 /* disable page scroll while modal is open */
 body.modal-open{overflow:hidden;}
-
-/* ---------- SPINNER (duplicate block kept for safety) ---------- */
-@keyframes spin{to{transform:rotate(360deg);}}
-.spinner{
-  width:24px;
-  height:24px;
-  border:3px solid var(--border);
-  border-top-color:var(--primary);
-  border-radius:50%;
-  animation:spin 1s linear infinite;
-  margin:auto;
-}
 
 /* ────────────────────────────────────────────────────────────────
    NEW STYLES FOR “EDIT VALUES” BUTTON
