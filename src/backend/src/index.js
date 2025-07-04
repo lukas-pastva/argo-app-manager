@@ -76,6 +76,7 @@ app.get("/api/files", async (_req, res) => {
 
 /* ════════════════════════════════════════════════════════════════
    2.  Flatten `appProjects[].applications[]`
+        – now supports both legacy `.name` and new `.namespace`
    ═══════════════════════════════════════════════════════════════ */
 app.get("/api/apps", async (req, res) => {
   const targets = req.query.file ? [req.query.file] : await listAppFiles();
@@ -83,11 +84,12 @@ app.get("/api/apps", async (req, res) => {
 
   for (const f of targets) {
     const doc = yaml.load(await fs.readFile(f, "utf8")) ?? {};
-    (doc.appProjects || []).forEach(p =>
+    (doc.appProjects || []).forEach(p => {
+      const projectId = p.namespace ?? p.name ?? "(unknown)";
       (p.applications || []).forEach(a =>
-        flat.push({ project: p.name, file: f, app: a }),
-      ),
-    );
+        flat.push({ project: projectId, file: f, app: a }),
+      );
+    });
   }
   res.json(flat);
 });

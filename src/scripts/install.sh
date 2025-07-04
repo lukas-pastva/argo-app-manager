@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #───────────────────────────────────────────────────────────────────────────────
-#  install.sh   –   v2.10  (owner-aware chart cache layout)
+#  install.sh   –   v2.11  (owner-aware chart cache layout, namespace key)
 #───────────────────────────────────────────────────────────────────────────────
 set -Eeuo pipefail
 [[ ${DEBUG:-false} == "true" ]] && set -x
@@ -117,7 +117,7 @@ else
 fi
 
 ###############################################################################
-# 6) Upsert Application block via yq (v4)
+# 6) Upsert Application block via yq (v4) – **namespace key**
 ###############################################################################
 command -v yq >/dev/null || { log "❌  yq v4 required"; exit 1; }
 log "🛠  yq version: $(yq --version)"
@@ -127,9 +127,9 @@ export CHART_PATH="external/${var_owner}/${var_chart}/${var_version}"
 export GITOPS_REPO
 
 yq_filter='.appProjects = (.appProjects // []) |
-  (.appProjects) |= map(select(.name != env(VAR_NAME))) |
+  (.appProjects) |= map(select(.namespace != env(VAR_NAME))) |
   .appProjects += [{
-    "name": env(VAR_NAME),
+    "namespace": env(VAR_NAME),
     "applications": [{
       "name":       env(VAR_NAME),
       "repoURL":    env(GITOPS_REPO),
