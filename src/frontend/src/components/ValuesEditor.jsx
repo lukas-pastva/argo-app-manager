@@ -1,35 +1,41 @@
 /*  ValuesEditor.jsx
     ───────────────────────────────────────────────────────────────
-    “Install chart” flow – now with an optional *friendly* UI that
-    turns YAML into a graphical form (see YamlTreeEditor).
+    “Install chart” flow – optionally switches to a *Friendly UX*
+    graphical editor (YamlTreeEditor).
 
-    New bits:
-      • <input type="checkbox"> “Switch to Friendly User Experience”
-      • When enabled  → hides Monaco editor, shows YamlTreeEditor
-      • All edits sync back to the underlying YAML (ymlRef.current)
+    Key points:
+      • Auto-detected “name” vs. “trio” install styles
+      • Toggle for download-only requests
+      • Toggle for Friendly UX (graphical) – preserves scroll
+      • Monaco full-screen mode
+      • Δ-preview before install / upgrade
 */
 
 import React, { useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
 import Spinner from "./Spinner.jsx";
-import YamlTreeEditor from "./YamlTreeEditor.jsx";   // ← NEW
+import YamlTreeEditor from "./YamlTreeEditor.jsx";
 import yaml from "js-yaml";
 
-/* ─── tiny fetch helpers ─────────────────────────────────────── */
+/* ── helpers ─────────────────────────────────────────────────── */
 async function fetchSmart(url, opts = {}) {
-  const res = await fetch(url, opts);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const ct = res.headers.get("content-type") || "";
-  return ct.includes("json") ? res.json() : res.text();
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const ct = r.headers.get("content-type") || "";
+  return ct.includes("json") ? r.json() : r.text();
 }
 function useFetch(url, deps, cb) {
   useEffect(() => {
     if (!url) return;
     const ctrl = new AbortController();
     (async () => {
-      try { cb(await fetchSmart(url, { signal: ctrl.signal })); } catch {}
+      try {
+        const res = await fetchSmart(url, { signal: ctrl.signal });
+        cb(res);
+      } catch {
+        /* ignore */
+      }
     })();
-    return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 }
@@ -39,43 +45,54 @@ const fmtDate = iso => {
 };
 
 /* ─────────────────────────────────────────────────────────────── */
-export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
-  /* ───────────────── fixed style (no dropdown) ─────────────── */
+
+export default function ValuesEditor({
+  chart,
+  installStyle = "name",
+  onBack,
+}) {
+  /* static (install style) ------------------------------------ */
   const style = installStyle === "trio" ? "trio" : "name";
 
-  /* ───────────────── chart versions / defaults ─────────────── */
+  /* chart versions / defaults --------------------------------- */
   const [versions, setVers] = useState([]);
-  const [ver,      setVer ] = useState("");
+  const [ver, setVer] = useState("");
   const [initVals, setInit] = useState("");
-  const [busy,     setBusy] = useState(true);
+  const [busy, setBusy] = useState(true);
 
-  /* ───────────────── form inputs ────────────────────────────── */
-  const [name,    setName ] = useState(chart.name); // style=name
-  const [team,    setTeam ] = useState("");         // style=trio
-  const [env,     setEnv  ] = useState("");
-  const [appCode, setCode ] = useState("");
+  /* form inputs ----------------------------------------------- */
+  const [name, setName] = useState(chart.name); // style=name
+  const [team, setTeam] = useState(""); // style=trio
+  const [env, setEnv] = useState("");
+  const [appCode, setCode] = useState("");
 
-  const [preview,      setPre]   = useState(null);  // { delta } | null
-  const [downloadOnly, setDL ]   = useState(false);
-  const [full,         setFull ] = useState(false);
-  const [friendly,     setFr ]   = useState(false); // ← NEW
+  /* toggles ---------------------------------------------------- */
+  const [preview, setPre] = useState(null); // { delta } | null
+  const [downloadOnly, setDL] = useState(false);
+  const [full, setFull] = useState(false);
+  const [friendly, setFr] = useState(false);
 
-  /* when friendly mode is on, this keeps the latest YAML ------- */
+  /* friendly mode – latest YAML buffer ------------------------ */
   const [treeYaml, setTreeYaml] = useState("");
 
-  /* ───────────────── monaco refs ────────────────────────────── */
+  /* monaco refs ------------------------------------------------ */
   const edDivRef = useRef(null);
-  const edRef    = useRef(null);
-  const ymlRef   = useRef("");
+  const edRef = useRef(null);
+  const ymlRef = useRef("");
 
-  /* ─── fetch versions once ─────────────────────────────────── */
+  /* fetch chart versions once --------------------------------- */
   useFetch(
-    `/api/chart/versions?owner=${encodeURIComponent(chart.repoName)}&chart=${encodeURIComponent(chart.name)}`,
+    `/api/chart/versions?owner=${encodeURIComponent(
+      chart.repoName,
+    )}&chart=${encodeURIComponent(chart.name)}`,
     [chart.name, chart.repoName],
-    (arr = []) => { setVers(arr); setVer(arr[0]?.version || ""); },
+    (arr = []) => {
+      setVers(arr);
+      setVer(arr[0]?.version || "");
+    },
   );
 
-  /* ─── fetch default values when version changes ───────────── */
+  /* fetch default values when version changes ----------------- */
   useEffect(() => {
     if (!ver) return;
     let cancelled = false;
@@ -89,31 +106,33 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
         if (!cancelled) {
           setInit(yml);
           ymlRef.current = yml;
+          if (friendly) setTreeYaml(yml);
           setBusy(false);
-          if (friendly) setTreeYaml(yml);          // sync if mode was on
         }
       } catch {
         if (!cancelled) {
           const msg = "# (no default values found)";
           setInit(msg);
           ymlRef.current = msg;
-          setBusy(false);
           if (friendly) setTreeYaml(msg);
+          setBusy(false);
         }
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [chart.packageId, ver, friendly]);
 
-  /* ─── mount Monaco once ───────────────────────────────────── */
+  /* mount Monaco once ----------------------------------------- */
   useEffect(() => {
     if (busy || !edDivRef.current || edRef.current || friendly) return;
     edRef.current = monaco.editor.create(edDivRef.current, {
-      value           : initVals,
-      language        : "yaml",
-      automaticLayout : true,
-      minimap         : { enabled: false },
+      value: initVals,
+      language: "yaml",
+      automaticLayout: true,
+      minimap: { enabled: false },
     });
     edRef.current.onDidChangeModelContent(() => {
       ymlRef.current = edRef.current.getValue();
@@ -121,8 +140,10 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
     return () => edRef.current?.dispose();
   }, [busy, initVals, friendly]);
 
-  /* ─── keep layout fresh when modals close / fs exit ───────── */
-  useEffect(() => { if (!preview && edRef.current) edRef.current.layout(); }, [preview]);
+  /* keep layout fresh ----------------------------------------- */
+  useEffect(() => {
+    if (!preview && edRef.current) edRef.current.layout();
+  }, [preview]);
   useEffect(() => {
     if (!full && edRef.current) {
       edRef.current.setValue(ymlRef.current);
@@ -130,20 +151,24 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
     }
   }, [full]);
 
-  /* ───────────────── full-screen editor (unchanged) ────────── */
+  /* full-screen Monaco editor --------------------------------- */
   function FullscreenEditor() {
     const ref = useRef(null);
     useEffect(() => {
       if (!ref.current) return;
       const e = monaco.editor.create(ref.current, {
-        value           : ymlRef.current,
-        language        : "yaml",
-        automaticLayout : true,
-        minimap         : { enabled: false },
+        value: ymlRef.current,
+        language: "yaml",
+        automaticLayout: true,
+        minimap: { enabled: false },
       });
-      e.onDidChangeModelContent(() => { ymlRef.current = e.getValue(); });
+      e.onDidChangeModelContent(() => {
+        ymlRef.current = e.getValue();
+      });
 
-      const esc = ev => { if (ev.key === "Escape") setFull(false); };
+      const esc = ev => {
+        if (ev.key === "Escape") setFull(false);
+      };
       window.addEventListener("keydown", esc);
 
       return () => {
@@ -162,24 +187,29 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
           style={{ width: "90vw", height: "90vh", padding: 0 }}
           onClick={e => e.stopPropagation()}
         >
-          <button className="modal-close" onClick={() => setFull(false)}>×</button>
+          <button className="modal-close" onClick={() => setFull(false)}>
+            ×
+          </button>
           <div ref={ref} style={{ width: "100%", height: "100%" }} />
         </div>
       </div>
     );
   }
 
-  /* ───────────────── YAML-Δ preview helper (unchanged) ─────── */
+  /* delta preview helper -------------------------------------- */
   async function openPreview() {
-    if (downloadOnly) { deploy(""); return; }
+    if (downloadOnly) {
+      deploy("");
+      return;
+    }
     setBusy(true);
     try {
       const delta = await fetchSmart("/api/delta", {
-        method  : "POST",
-        headers : { "Content-Type": "application/json" },
-        body    : JSON.stringify({
-          defaultYaml : initVals,
-          userYaml    : ymlRef.current,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          defaultYaml: initVals,
+          userYaml: ymlRef.current,
         }),
       });
       setPre({ delta });
@@ -191,28 +221,36 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
     }
   }
 
-  /* ───────────────── deploy / download helper (unchanged) ──── */
+  /* install / download helper --------------------------------- */
   async function deploy(deltaOverride) {
     const deltaStr =
       (deltaOverride ?? (preview?.delta || "").trim()) || "# (no overrides)";
 
     /* derive identifiers */
-    let release, namespace, extra = {};
+    let release,
+      namespace,
+      extra = {};
     if (style === "name") {
-      release   = name.trim() || chart.name;
+      release = name.trim() || chart.name;
       namespace = release;
-      extra     = { name: release };
-    } else { // trio
-      release   = appCode.trim();
-      namespace = [team.trim(), env.trim(), appCode.trim()].filter(Boolean).join("-");
-      extra     = { applicationCode: appCode.trim(), team: team.trim(), env: env.trim() };
+      extra = { name: release };
+    } else {
+      release = appCode.trim();
+      namespace = [team.trim(), env.trim(), appCode.trim()]
+        .filter(Boolean)
+        .join("-");
+      extra = {
+        applicationCode: appCode.trim(),
+        team: team.trim(),
+        env: env.trim(),
+      };
     }
 
     const base = {
-      chart  : chart.name,
+      chart: chart.name,
       version: ver,
-      repo   : chart.repoURL,
-      owner  : chart.repoName,
+      repo: chart.repoURL,
+      owner: chart.repoName,
       release,
       namespace,
     };
@@ -232,9 +270,9 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
 
     setBusy(true);
     await fetch(endpoint, {
-      method  : "POST",
-      headers : { "Content-Type": "application/json" },
-      body    : JSON.stringify(payload),
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
     setBusy(false);
 
@@ -242,17 +280,17 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
     onBack();
   }
 
-  /* ───────────────── preview modal (unchanged) ─────────────── */
+  /* preview modal (unchanged) --------------------------------- */
   function PreviewModal() {
     const mRef = useRef(null);
     useEffect(() => {
       if (!mRef.current) return;
       const e = monaco.editor.create(mRef.current, {
-        value           : preview?.delta || "# (no overrides)",
-        language        : "yaml",
-        readOnly        : true,
-        automaticLayout : true,
-        minimap         : { enabled: false },
+        value: preview?.delta || "# (no overrides)",
+        language: "yaml",
+        readOnly: true,
+        automaticLayout: true,
+        minimap: { enabled: false },
       });
       return () => e.dispose();
     }, []);
@@ -264,17 +302,42 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
           style={{ width: "64vw", maxWidth: 900 }}
           onClick={e => e.stopPropagation()}
         >
-          <button className="modal-close" onClick={() => setPre(null)}>×</button>
+          <button className="modal-close" onClick={() => setPre(null)}>
+            ×
+          </button>
           <h2 style={{ margin: "0 0 .5rem" }}>Override values preview</h2>
-          <p style={{ margin: "0 0 1rem", fontSize: ".85rem", color: "var(--text-light)" }}>
+          <p
+            style={{
+              margin: "0 0 1rem",
+              fontSize: ".85rem",
+              color: "var(--text-light)",
+            }}
+          >
             Only the keys that differ from chart defaults will be saved.
           </p>
           <div
             ref={mRef}
-            style={{ height: "50vh", border: "1px solid var(--border)", borderRadius: 6 }}
+            style={{
+              height: "50vh",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+            }}
           />
-          <div style={{ display: "flex", gap: "1rem", justifyContent: "flex-end", marginTop: "1.1rem" }}>
-            <button className="btn-secondary" onClick={() => setPre(null)} disabled={busy}>Back</button>
+          <div
+            style={{
+              display: "flex",
+              gap: "1rem",
+              justifyContent: "flex-end",
+              marginTop: "1.1rem",
+            }}
+          >
+            <button
+              className="btn-secondary"
+              onClick={() => setPre(null)}
+              disabled={busy}
+            >
+              Back
+            </button>
             <button className="btn" onClick={() => deploy()} disabled={busy}>
               {busy ? "Saving…" : "Install"}
             </button>
@@ -284,29 +347,54 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
     );
   }
 
-  /* ───────────────── header helper (unchanged) ─────────────── */
+  /* header helper --------------------------------------------- */
   function ChartHeader() {
     return (
-      <div style={{ display: "flex", alignItems: "flex-start", gap: "1rem", marginBottom: "1.1rem" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: "1rem",
+          marginBottom: "1.1rem",
+        }}
+      >
         {chart.logo && (
           <img
             src={chart.logo}
             alt=""
             style={{
-              width: 48, height: 48, borderRadius: 6,
-              objectFit: "contain", background: "#fff", flexShrink: 0,
+              width: 48,
+              height: 48,
+              borderRadius: 6,
+              objectFit: "contain",
+              background: "#fff",
+              flexShrink: 0,
             }}
           />
         )}
         <div style={{ minWidth: 0 }}>
           <h2 style={{ margin: 0 }}>{chart.displayName || chart.name}</h2>
           {chart.repoName && (
-            <p style={{ margin: ".1rem 0 0", fontSize: ".83rem", color: "var(--text-light)" }}>
-              {chart.repoName}{chart.latest ? ` · latest ${chart.latest}` : ""}
+            <p
+              style={{
+                margin: ".1rem 0 0",
+                fontSize: ".83rem",
+                color: "var(--text-light)",
+              }}
+            >
+              {chart.repoName}
+              {chart.latest ? ` · latest ${chart.latest}` : ""}
             </p>
           )}
           {chart.description && (
-            <p style={{ margin: ".45rem 0 0", fontSize: ".9rem", color: "var(--text-light)", maxWidth: "60ch" }}>
+            <p
+              style={{
+                margin: ".45rem 0 0",
+                fontSize: ".9rem",
+                color: "var(--text-light)",
+                maxWidth: "60ch",
+              }}
+            >
               {chart.description}
             </p>
           )}
@@ -315,28 +403,31 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
     );
   }
 
-  /* ───────────────── readiness checks ───────────────────────── */
+  /* readiness checks ------------------------------------------ */
   const namesOk =
     style === "name"
       ? Boolean(name.trim())
       : team.trim() && env.trim() && appCode.trim();
 
-  /* ───────────────── render ─────────────────────────────────── */
+  /* render ----------------------------------------------------- */
   return (
     <>
       {preview && <PreviewModal />}
-      {full    && <FullscreenEditor />}
+      {full && <FullscreenEditor />}
 
-      <button className="btn-secondary btn-back" onClick={onBack}>← Back</button>
+      <button className="btn-secondary btn-back" onClick={onBack}>
+        ← Back
+      </button>
       <ChartHeader />
 
-      {/* version select */}
+      {/* version */}
       <label>Version</label>
       {versions.length ? (
         <select value={ver} onChange={e => setVer(e.target.value)}>
           {versions.map(v => (
             <option key={v.version} value={v.version}>
-              {v.version}{v.date ? `  –  ${fmtDate(v.date)}` : ""}
+              {v.version}
+              {v.date ? `  –  ${fmtDate(v.date)}` : ""}
             </option>
           ))}
         </select>
@@ -344,7 +435,7 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
         <em>no versions found</em>
       )}
 
-      {/* inputs */}
+      {/* name / trio inputs */}
       {style === "name" ? (
         <>
           <label style={{ marginTop: "1rem" }}>Application name</label>
@@ -383,7 +474,7 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
         </>
       )}
 
-      {/* download-only toggle */}
+      {/* download-only */}
       <label style={{ marginTop: "1rem", display: "flex", gap: ".5rem" }}>
         <input
           type="checkbox"
@@ -394,7 +485,7 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
         <span>I only want to download this Helm chart (do not install)</span>
       </label>
 
-      {/* FRIENDLY-MODE toggle (NEW) */}
+      {/* Friendly UX toggle – preserves scroll ------------------ */}
       {!downloadOnly && (
         <label style={{ marginTop: ".6rem", display: "flex", gap: ".5rem" }}>
           <input
@@ -402,15 +493,16 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
             checked={friendly}
             onChange={e => {
               const checked = e.target.checked;
+              const y = window.scrollY; // keep scroll
               if (checked) {
-                /* switching *to* friendly → seed tree editor */
                 setTreeYaml(ymlRef.current);
               } else {
-                /* switching back → sync latest tree edits to Monaco */
                 ymlRef.current = treeYaml;
-                if (edRef.current) edRef.current.setValue(ymlRef.current);
+                if (edRef.current)
+                  edRef.current.setValue(ymlRef.current);
               }
               setFr(checked);
+              requestAnimationFrame(() => window.scrollTo(0, y));
             }}
             style={{ transform: "translateY(2px)" }}
           />
@@ -418,10 +510,17 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
         </label>
       )}
 
-      {/* editor area (YAML or tree) */}
-      {!downloadOnly && (
-        busy ? (
-          <div style={{ height: "52vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      {/* editor area */}
+      {!downloadOnly &&
+        (busy ? (
+          <div
+            style={{
+              height: "52vh",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
             <Spinner size={36} />
           </div>
         ) : friendly ? (
@@ -436,15 +535,21 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
           <div style={{ position: "relative" }}>
             <button
               className="btn-secondary"
-              style={{ position: "absolute", top: 6, right: 6, padding: ".25rem .6rem", fontSize: ".8rem", zIndex: 5 }}
+              style={{
+                position: "absolute",
+                top: 6,
+                right: 6,
+                padding: ".25rem .6rem",
+                fontSize: ".8rem",
+                zIndex: 5,
+              }}
               onClick={() => setFull(true)}
             >
               ⤢ Full screen
             </button>
             <div ref={edDivRef} className="editor-frame" />
           </div>
-        )
-      )}
+        ))}
 
       {/* primary action */}
       <button
