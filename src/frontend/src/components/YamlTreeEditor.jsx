@@ -1,7 +1,8 @@
-/*  YamlTreeEditor.jsx  –  v3
-    Friendly, scroll-safe form editor for Helm values.
+/*  YamlTreeEditor.jsx – v4
+    Friendly UX editor where the *whole line* of an object/array
+    toggles expand/collapse on click (not just the ＋ / − icon),
+    while primitive rows remain editable.
 */
-
 import React, { useState, useCallback, useMemo, useRef } from "react";
 import yaml from "js-yaml";
 
@@ -12,7 +13,7 @@ function extractHelp(src = "") {
   const lines = src.split(/\r?\n/);
   const stack = [];
   const map   = new Map();
-  let buf     = [];
+  let buf = [];
 
   const flush = p => {
     if (!buf.length) return;
@@ -45,22 +46,23 @@ export default function YamlTreeEditor({ yamlText = "", onChange }) {
   });
   const helps = useMemo(() => extractHelp(yamlText), [yamlText]);
 
-  /* expand / collapse state */
+  /* expand / collapse */
   const [expanded, setExp] = useState(new Set());
   const rootRef = useRef(null);
 
-  const toggle = useCallback(p => {
-    const st = rootRef.current?.scrollTop || 0;
+  const toggle = useCallback(path => {
+    const y = rootRef.current?.scrollTop || 0;
     setExp(s => {
-      const n = new Set(s);
-      n.has(p) ? n.delete(p) : n.add(p);
-      return n;
+      const nxt = new Set(s);
+      nxt.has(path) ? nxt.delete(path) : nxt.add(path);
+      return nxt;
     });
     requestAnimationFrame(() => {
-      if (rootRef.current) rootRef.current.scrollTop = st;
+      if (rootRef.current) rootRef.current.scrollTop = y;
     });
   }, []);
 
+  /* write helper */
   const write = useCallback((arr, val) => {
     const nxt = clone(tree);
     let ptr = nxt;
@@ -73,44 +75,81 @@ export default function YamlTreeEditor({ yamlText = "", onChange }) {
   /* node renderer */
   const Node = ({ k, v, depth, path }) => {
     const indent = { paddingLeft: depth * 16 };
-    const isObj  = v && typeof v === "object" && !Array.isArray(v);
+    const isObj = v && typeof v === "object";
+    const isArr = Array.isArray(v);
 
-    if (isObj) {
+    /* OBJECT / ARRAY ------------------------------------------ */
+    if (isObj && !isArr) {
       const open = expanded.has(path);
       return (
         <div className={`yaml-tree-block ${depth === 0 ? "root" : ""}`} style={indent}>
-          <button className="yaml-toggle" onClick={() => toggle(path)}
-                  aria-label={open ? "collapse" : "expand"}>{open ? "−" : "＋"}</button>
-          <strong className="yaml-tree-key">{k}</strong>
+          <div className="yaml-tree-row clickable" onClick={() => toggle(path)}>
+            <button
+              className="yaml-toggle"
+              onClick={e => { e.stopPropagation(); toggle(path); }}
+              aria-label={open ? "collapse" : "expand"}
+            >
+              {open ? "−" : "＋"}
+            </button>
+            <strong className="yaml-tree-key">{k}</strong>
+          </div>
+
           {open &&
             Object.entries(v).map(([ck, cv]) => (
               <Node key={ck} k={ck} v={cv} depth={depth + 1} path={`${path}.${ck}`} />
             ))}
+
           {helps.has(path) && <div className="yaml-help">{helps.get(path)}</div>}
         </div>
       );
     }
 
-    /* primitive */
-    const input = typeof v === "boolean" ? (
-      <input
-        type="checkbox"
-        checked={v}
-        onChange={e => write(path.split("."), e.target.checked)}
-      />
-    ) : (
-      <input
-        className="yaml-tree-input"
-        type={typeof v === "number" ? "number" : "text"}
-        value={v === null ? "" : v}
-        onChange={e =>
-          write(
-            path.split("."),
-            typeof v === "number" ? +e.target.value : e.target.value,
-          )
-        }
-      />
-    );
+    if (isArr) {
+      const open = expanded.has(path);
+      return (
+        <div className={`yaml-tree-block ${depth === 0 ? "root" : ""}`} style={indent}>
+          <div className="yaml-tree-row clickable" onClick={() => toggle(path)}>
+            <button
+              className="yaml-toggle"
+              onClick={e => { e.stopPropagation(); toggle(path); }}
+              aria-label={open ? "collapse" : "expand"}
+            >
+              {open ? "−" : "＋"}
+            </button>
+            <strong className="yaml-tree-key">{k}</strong>&nbsp;[{v.length}]
+          </div>
+
+          {open &&
+            v.map((item, i) => (
+              <Node key={i} k={i} v={item} depth={depth + 1} path={`${path}.${i}`} />
+            ))}
+
+          {helps.has(path) && <div className="yaml-help">{helps.get(path)}</div>}
+        </div>
+      );
+    }
+
+    /* PRIMITIVE ----------------------------------------------- */
+    const input =
+      typeof v === "boolean" ? (
+        <input
+          type="checkbox"
+          checked={v}
+          onChange={e => write(path.split("."), e.target.checked)}
+        />
+      ) : (
+        <input
+          className="yaml-tree-input"
+          type={typeof v === "number" ? "number" : "text"}
+          value={v === null ? "" : v}
+          onChange={e =>
+            write(
+              path.split("."),
+              typeof v === "number" ? +e.target.value : e.target.value,
+            )
+          }
+        />
+      );
 
     return (
       <div className={`yaml-tree-block ${depth === 0 ? "root" : ""}`} style={indent}>
@@ -124,7 +163,7 @@ export default function YamlTreeEditor({ yamlText = "", onChange }) {
     );
   };
 
-  /* render root */
+  /* render root ----------------------------------------------- */
   return (
     <div
       ref={rootRef}
@@ -134,7 +173,7 @@ export default function YamlTreeEditor({ yamlText = "", onChange }) {
         padding: ".6rem 0",
         maxHeight: "52vh",
         overflowY: "auto",
-        marginBottom: "1.5rem",      /* space before Install button */
+        marginBottom: "1.5rem",
       }}
     >
       {Object.entries(tree).map(([k, v]) => (
