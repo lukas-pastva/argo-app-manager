@@ -29,13 +29,9 @@ body{background:var(--bg);color:var(--text);line-height:1.5;
      transition:background .25s,color .25s;}
 
 /* ────────────────────────────────────────────────────────────────
-   LAYOUT  (full-width)
+   LAYOUT  (full-width card removed)
    ────────────────────────────────────────────────────────────── */
-.app-wrapper{
-  width:100%;max-width:none;margin:0;padding:2rem 3rem;
-  background:var(--card-bg);border-radius:0;box-shadow:none;
-  transition:background .25s;
-}
+.app-wrapper{width:100%;max-width:none;margin:0;padding:2rem 3rem;}
 
 /* ────────────────────────────────────────────────────────────────
    TYPOGRAPHY
@@ -69,12 +65,13 @@ h3{margin:0 0 .8rem;font-size:1.1rem;color:var(--primary);}
    TABS
    ────────────────────────────────────────────────────────────── */
 .tabs{display:flex;gap:.25rem;margin-bottom:1.2rem;border-bottom:1px solid var(--border);
-  width:100%;overflow-x:auto;flex-wrap:nowrap;}
+  overflow-x:auto;flex-wrap:nowrap;}
 .tab{flex:0 0 auto;padding:.5rem 1rem;border-radius:6px 6px 0 0;cursor:pointer;
   background:#e8edf2;color:var(--text-light);font-size:.9rem;}
 [data-theme='dark'] .tab{background:#242a30;color:var(--text-light);}
 .tab.active{background:var(--card-bg);border:1px solid var(--border);
   border-bottom-color:var(--card-bg);color:var(--primary);font-weight:600;}
+
 
 /* ────────────────────────────────────────────────────────────────
    SEARCH
@@ -148,39 +145,41 @@ body.modal-open{overflow:hidden;}
 .edit-fab{position:absolute;top:6px;right:6px;z-index:10;padding:.35rem .9rem;
   font-size:.8rem;line-height:1.1;}
 
+
+/* ────────────────────────────────────────────────────────────────
+   MONACO FRAME
+   ────────────────────────────────────────────────────────────── */
+.editor-frame{margin:1rem 0 1.5rem;border:1px solid var(--border);
+  border-radius:6px;overflow:hidden;height:52vh;}
+
 /* ────────────────────────────────────────────────────────────────
    YAML TREE EDITOR  – Friendly UX
    ────────────────────────────────────────────────────────────── */
-.yaml-tree-block{padding:.4rem 0;position:relative;}
-.yaml-tree-block.root{padding-top:1.2rem;}
-.yaml-tree-block.root:first-of-type{padding-top:.4rem;}
+.yaml-tree-block{padding:.35rem 0;position:relative;}
 .yaml-tree-block.root+ .yaml-tree-block.root{border-top:1px solid var(--border);}
-
-.yaml-tree-row{display:flex;flex-wrap:wrap;align-items:flex-start;gap:1rem;}
+.yaml-tree-row{display:flex;flex-wrap:wrap;align-items:center;gap:.9rem;}
+.yaml-tree-row:hover{background:rgba(0,0,0,.035);}
+[data-theme='dark'] .yaml-tree-row:hover{background:rgba(255,255,255,.04);}
 .yaml-tree-row.clickable{cursor:pointer;}
 
 .yaml-toggle,.yaml-toggle-spacer{width:18px;flex:0 0 18px;}
 .yaml-toggle{border:none;background:transparent;cursor:pointer;font-weight:700;line-height:1;}
 .yaml-toggle-spacer{display:inline-block;}
 
-.yaml-tree-key{min-width:180px;font-weight:600;}
-.yaml-tree-input{flex:1 1 380px;min-width:240px;padding:.45rem .7rem;border:1px solid var(--border);
-  border-radius:6px;background:var(--card-bg);color:var(--text);}
-
-.yaml-tree-row:hover{background:rgba(0,0,0,.035);}
-[data-theme='dark'] .yaml-tree-row:hover{background:rgba(255,255,255,.04);}
-
-/* help icon + tooltip */
-.yaml-help-icon{display:inline-block;margin-left:.35rem;font-size:.85rem;line-height:1;
-  user-select:none;cursor:help;color:var(--primary);opacity:.75;}
+.yaml-help-icon{font-size:1.1rem;line-height:1;cursor:help;color:var(--primary);
+  user-select:none;opacity:.8;}
 .yaml-help-icon:hover{opacity:1;}
 
-.yaml-help{display:none;position:absolute;top:calc(100% + .35rem);
-  left:calc(198px + 18px); /* key + toggle */
-  padding:.5rem .7rem;max-width:360px;background:var(--card-bg);
+.yaml-help{display:none;position:absolute;top:calc(100% + .4rem);left:34px;
+  padding:.55rem .8rem;max-width:360px;background:var(--card-bg);
   border:1px solid var(--border);border-radius:8px;color:var(--text-light);
   font-size:.8rem;line-height:1.4;box-shadow:0 4px 14px rgba(0,0,0,.15);z-index:50;}
 .yaml-help-icon:hover + .yaml-help{display:block;}
+
+.yaml-tree-key{min-width:180px;font-weight:600;}
+.yaml-tree-input{flex:1 1 380px;min-width:240px;padding:.45rem .7rem;
+  border:1px solid var(--border);border-radius:6px;background:var(--card-bg);
+  color:var(--text);}
 
 .yaml-tree-container{margin-bottom:1.5rem;}
 
