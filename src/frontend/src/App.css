@@ -1,22 +1,11 @@
-/* … existing styles up to “NEW STYLES FOR EDIT VALUES BUTTON” … */
 /* ---------- THEME TOKENS ---------- */
-:root {
-  --bg:            #f7f9fb;
-  --card-bg:       #ffffff;
-  --border:        #d6dbe0;
-  --text:          #222;
-  --text-light:    #444;
-  --primary:       #0061b0;
-  --primary-hover: #004d8a;
+:root{
+  --bg:#f7f9fb;--card-bg:#fff;--border:#d6dbe0;--text:#222;--text-light:#444;
+  --primary:#0061b0;--primary-hover:#004d8a;
 }
-[data-theme='dark'] {
-  --bg:            #12161a;
-  --card-bg:       #1d2228;
-  --border:        #2a2e34;
-  --text:          #eaecef;
-  --text-light:    #b0b5bc;
-  --primary:       #3b93ff;
-  --primary-hover: #2174ff;
+[data-theme='dark']{
+  --bg:#12161a;--card-bg:#1d2228;--border:#2a2e34;--text:#eaecef;
+  --text-light:#b0b5bc;--primary:#3b93ff;--primary-hover:#2174ff;
 }
 
 /* ---------- RESET ---------- */
@@ -27,9 +16,8 @@ body{background:var(--bg);color:var(--text);
 
 /* ---------- LAYOUT ---------- */
 .app-wrapper{
-  max-width:1280px;margin:2.5rem auto;padding:2rem 3rem;
-  background:var(--card-bg);border-radius:12px;
-  box-shadow:0 8px 20px rgba(0,0,0,.06);
+  width:100%;max-width:none;margin:0;padding:2rem 3rem;
+  background:var(--card-bg);border-radius:0;box-shadow:none;
   transition:background .25s;
 }
 
@@ -228,28 +216,29 @@ body.modal-open{overflow:hidden;}
 .truncate{  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ────────────────────────────────────────────────────────────────
-   YAML TREE EDITOR  –  Friendly UX  (NEW)
+   YAML TREE EDITOR  –  Friendly UX
    ────────────────────────────────────────────────────────────── */
 
+.yaml-tree-block{margin:.4rem 0;}
 .yaml-tree-row{
-  display:flex;
-  align-items:center;
-  gap:.75rem;
-  margin:.35rem 0;
+  display:flex;flex-wrap:wrap;align-items:flex-start;gap:1rem;
 }
 .yaml-tree-key{
-  font-weight:500;
+  min-width:180px;font-weight:600;
 }
 .yaml-tree-input{
-  flex:0 0 260px;
-  padding:.35rem .6rem;
-  border:1px solid var(--border);
-  border-radius:6px;
-  background:var(--card-bg);
-  color:var(--text);
+  flex:1 1 380px;min-width:240px;
+  padding:.45rem .7rem;border:1px solid var(--border);border-radius:6px;
+  background:var(--card-bg);color:var(--text);
 }
 .yaml-help{
-  font-size:.75rem;
-  color:var(--text-light);
-  max-width:60ch;
+  flex-basis:100%;           /* new line */
+  margin:.2rem 0 0 calc(180px + 1rem);
+  font-size:.8rem;line-height:1.35;color:var(--text-light);
+}
+
+/* make expand/collapse toggle more visible */
+.yaml-toggle{
+  width:18px;border:none;background:transparent;cursor:pointer;
+  line-height:1;font-weight:700;
 }
