@@ -219,3 +219,37 @@ body.modal-open{overflow:hidden;}
 
 .text-light{ color: var(--text-light); }
 .truncate{  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ────────────────────────────────────────────────────────────────
+   UTILITIES  (NEW)
+   ────────────────────────────────────────────────────────────── */
+
+.text-light{ color: var(--text-light); }
+.truncate{  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ────────────────────────────────────────────────────────────────
+   YAML TREE EDITOR  –  Friendly UX  (NEW)
+   ────────────────────────────────────────────────────────────── */
+
+.yaml-tree-row{
+  display:flex;
+  align-items:center;
+  gap:.75rem;
+  margin:.35rem 0;
+}
+.yaml-tree-key{
+  font-weight:500;
+}
+.yaml-tree-input{
+  flex:0 0 260px;
+  padding:.35rem .6rem;
+  border:1px solid var(--border);
+  border-radius:6px;
+  background:var(--card-bg);
+  color:var(--text);
+}
+.yaml-help{
+  font-size:.75rem;
+  color:var(--text-light);
+  max-width:60ch;
+}
