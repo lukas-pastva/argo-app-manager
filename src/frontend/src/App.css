@@ -1,94 +1,201 @@
-/* ---------- THEME TOKENS ---------- */
+/* ────────────────────────────────────────────────────────────────
+   THEME TOKENS
+   ────────────────────────────────────────────────────────────── */
 :root{
-  --bg:#f7f9fb;--card-bg:#fff;--border:#d6dbe0;--text:#222;--text-light:#444;
-  --primary:#0061b0;--primary-hover:#004d8a;
+  --bg:#f7f9fb;
+  --card-bg:#ffffff;
+  --border:#d6dbe0;
+  --text:#222;
+  --text-light:#444;
+  --primary:#0061b0;
+  --primary-hover:#004d8a;
 }
 [data-theme='dark']{
-  --bg:#12161a;--card-bg:#1d2228;--border:#2a2e34;--text:#eaecef;
-  --text-light:#b0b5bc;--primary:#3b93ff;--primary-hover:#2174ff;
+  --bg:#12161a;
+  --card-bg:#1d2228;
+  --border:#2a2e34;
+  --text:#eaecef;
+  --text-light:#b0b5bc;
+  --primary:#3b93ff;
+  --primary-hover:#2174ff;
 }
 
-/* ---------- RESET ---------- */
-*{box-sizing:border-box;margin:0;padding:0;
-  font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
-body{background:var(--bg);color:var(--text);
-     transition:background .25s,color .25s;line-height:1.5;}
+/* ────────────────────────────────────────────────────────────────
+   RESET
+   ────────────────────────────────────────────────────────────── */
+*{
+  box-sizing:border-box;
+  margin:0;
+  padding:0;
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+body{
+  background:var(--bg);
+  color:var(--text);
+  line-height:1.5;
+  transition:background .25s,color .25s;
+}
 
-/* ---------- LAYOUT ---------- */
-/* FULL-WIDTH container (no max-width, flush to edges) */
+/* ────────────────────────────────────────────────────────────────
+   LAYOUT  (full-width)
+   ────────────────────────────────────────────────────────────── */
 .app-wrapper{
-  width:100%;max-width:none;margin:0;padding:2rem 3rem;
-  background:var(--card-bg);border-radius:0;box-shadow:none;
+  width:100%;
+  max-width:none;
+  margin:0;
+  padding:2rem 3rem;
+  background:var(--card-bg);
+  border-radius:0;
+  box-shadow:none;
   transition:background .25s;
 }
 
-/* ---------- TYPO ---------- */
+/* ────────────────────────────────────────────────────────────────
+   TYPOGRAPHY
+   ────────────────────────────────────────────────────────────── */
 h1{margin-bottom:1.75rem;font-size:2rem;font-weight:600;color:var(--primary);}
 h2{margin:1rem 0 .75rem;font-size:1.25rem;font-weight:600;color:var(--primary);}
 h3{margin:0 0 .8rem;font-size:1.1rem;color:var(--primary);}
 
-/* ---------- BUTTONS ---------- */
+/* ────────────────────────────────────────────────────────────────
+   BUTTONS
+   ────────────────────────────────────────────────────────────── */
 .btn,.btn-secondary{
-  padding:.55rem 1.4rem;border:none;border-radius:6px;font-size:.95rem;
-  cursor:pointer;transition:background .25s;
+  padding:.55rem 1.4rem;
+  border:none;
+  border-radius:6px;
+  font-size:.95rem;
+  cursor:pointer;
+  transition:background .25s;
 }
-.btn{background:var(--primary);color:#fff;}
+.btn{
+  background:var(--primary);
+  color:#fff;
+}
 .btn:hover{background:var(--primary-hover);}
-.btn-secondary{background:#e6e9ec;color:var(--text);}
-[data-theme='dark'] .btn-secondary{background:#2f343a;color:var(--text-light);}
+.btn-secondary{
+  background:#e6e9ec;
+  color:var(--text);
+}
+[data-theme='dark'] .btn-secondary{
+  background:#2f343a;
+  color:var(--text-light);
+}
 .btn-secondary:hover{background:#d5d9dd;}
 [data-theme='dark'] .btn-secondary:hover{background:#3b4047;}
 .btn-back{margin-bottom:1.2rem;}
 
-/* ---------- THEME TOGGLE ---------- */
+/* ────────────────────────────────────────────────────────────────
+   THEME TOGGLE (top-right emoji)
+   ────────────────────────────────────────────────────────────── */
 .theme-toggle{
-  position:absolute;top:1rem;right:1.4rem;
-  font-size:1.25rem;cursor:pointer;color:var(--primary);user-select:none;
+  position:absolute;
+  top:1rem;
+  right:1.4rem;
+  font-size:1.25rem;
+  cursor:pointer;
+  color:var(--primary);
+  user-select:none;
 }
 
-/* ---------- TABS ---------- */
+/* ────────────────────────────────────────────────────────────────
+   TABS (file tabs)
+   ────────────────────────────────────────────────────────────── */
 .tabs{
-  display:flex;gap:.25rem;margin-bottom:1.2rem;border-bottom:1px solid var(--border);
-  width:100%;overflow-x:auto;flex-wrap:nowrap;
+  display:flex;
+  gap:.25rem;
+  margin-bottom:1.2rem;
+  border-bottom:1px solid var(--border);
+  width:100%;
+  overflow-x:auto;
+  flex-wrap:nowrap;
 }
 .tab{
-  flex:0 0 auto;padding:.5rem 1rem;border-radius:6px 6px 0 0;cursor:pointer;
-  background:#e8edf2;color:var(--text-light);font-size:.9rem;
+  flex:0 0 auto;
+  padding:.5rem 1rem;
+  border-radius:6px 6px 0 0;
+  cursor:pointer;
+  background:#e8edf2;
+  color:var(--text-light);
+  font-size:.9rem;
 }
-[data-theme='dark'] .tab{background:#242a30;color:var(--text-light);}
+[data-theme='dark'] .tab{
+  background:#242a30;
+  color:var(--text-light);
+}
 .tab.active{
-  background:var(--card-bg);border:1px solid var(--border);
-  border-bottom-color:var(--card-bg);color:var(--primary);font-weight:600;
+  background:var(--card-bg);
+  border:1px solid var(--border);
+  border-bottom-color:var(--card-bg);
+  color:var(--primary);
+  font-weight:600;
 }
 
-/* ---------- SEARCH ---------- */
-.search-box{display:flex;gap:.8rem;margin-bottom:1rem;}
+/* ────────────────────────────────────────────────────────────────
+   SEARCH (Artifact Hub type-ahead)
+   ────────────────────────────────────────────────────────────── */
+.search-box{
+  display:flex;
+  gap:.8rem;
+  margin-bottom:1rem;
+}
 .search-input{
-  flex:1;padding:.6rem .9rem;border:1px solid var(--border);
-  border-radius:6px;font-size:1rem;background:var(--card-bg);color:var(--text);
+  flex:1;
+  padding:.6rem .9rem;
+  border:1px solid var(--border);
+  border-radius:6px;
+  font-size:1rem;
+  background:var(--card-bg);
+  color:var(--text);
 }
 .results-list{
-  margin-top:.5rem;border:1px solid var(--border);border-radius:6px;
-  max-height:260px;overflow-y:auto;
+  margin-top:.5rem;
+  border:1px solid var(--border);
+  border-radius:6px;
+  max-height:260px;
+  overflow-y:auto;
 }
-.result-item{display:flex;align-items:center;gap:.7rem;
-             padding:.55rem .9rem;cursor:pointer;}
+.result-item{
+  display:flex;
+  align-items:center;
+  gap:.7rem;
+  padding:.55rem .9rem;
+  cursor:pointer;
+}
 .result-item:hover{background:#f1f4f7;}
 [data-theme='dark'] .result-item:hover{background:#242a30;}
-.result-item img{width:26px;height:26px;border-radius:4px;object-fit:contain;background:#fff;}
+.result-item img{
+  width:26px;height:26px;
+  border-radius:4px;
+  object-fit:contain;
+  background:#fff;
+}
 .result-item small{display:block;}
 
-/* ---------- PROJECT / APP GRID ---------- */
+/* ────────────────────────────────────────────────────────────────
+   PROJECT / APPLICATION GRID
+   ────────────────────────────────────────────────────────────── */
 .project-group{
-  border:1px solid var(--border);border-radius:10px;padding:1rem 1.25rem;
-  margin-bottom:1.5rem;background:var(--card-bg);transition:background .25s;
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:1rem 1.25rem;
+  margin-bottom:1.5rem;
+  background:var(--card-bg);
+  transition:background .25s;
 }
 .apps-list{
-  display:grid;gap:.8rem;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
+  display:grid;
+  gap:.8rem;
+  grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
 }
 .app-card{
-  display:flex;align-items:center;gap:.7rem;padding:.6rem .8rem;
-  border:1px solid var(--border);border-radius:8px;background:var(--card-bg);
+  display:flex;
+  align-items:center;
+  gap:.7rem;
+  padding:.6rem .8rem;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:var(--card-bg);
   transition:background .25s;
 }
 .app-card:hover{background:#f0f2f6;}
@@ -97,84 +204,197 @@ h3{margin:0 0 .8rem;font-size:1.1rem;color:var(--primary);}
 .app-card .name{font-weight:600;color:var(--text);}
 .app-card small{color:var(--text-light);font-size:.72rem;display:block;}
 .app-card .del-btn{
-  margin-left:auto;font-size:1rem;cursor:pointer;color:var(--text-light);transition:color .2s;
+  margin-left:auto;
+  font-size:1rem;
+  cursor:pointer;
+  color:var(--text-light);
+  transition:color .2s;
 }
 .app-card .del-btn:hover{color:#d0392e;}
 
-/* ---------- EDITOR FRAME ---------- */
+/* ────────────────────────────────────────────────────────────────
+   MONACO EDITOR FRAME (YAML)
+   ────────────────────────────────────────────────────────────── */
 .editor-frame{
-  margin:1rem 0 1.5rem;border:1px solid var(--border);border-radius:6px;
-  overflow:hidden;height:52vh;
+  margin:1rem 0 1.5rem;
+  border:1px solid var(--border);
+  border-radius:6px;
+  overflow:hidden;
+  height:52vh;
 }
 
-/* ---------- FORM & SELECT ---------- */
-label{display:block;margin:1rem 0 .35rem;font-weight:500;}
+/* ────────────────────────────────────────────────────────────────
+   FORM CONTROLS
+   ────────────────────────────────────────────────────────────── */
+label{
+  display:block;
+  margin:1rem 0 .35rem;
+  font-weight:500;
+}
 select{
-  width:100%;padding:.55rem .8rem;border:1px solid var(--border);
-  border-radius:6px;font-size:.95rem;background:var(--card-bg);color:var(--text);
+  width:100%;
+  padding:.55rem .8rem;
+  border:1px solid var(--border);
+  border-radius:6px;
+  font-size:.95rem;
+  background:var(--card-bg);
+  color:var(--text);
   appearance:none;
   background-image:url("data:image/svg+xml,%3csvg viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M0 0l5 6 5-6' fill='%23999'/%3e%3c/svg%3e");
-  background-repeat:no-repeat;background-position:right .6rem center;background-size:10px 6px;
+  background-repeat:no-repeat;
+  background-position:right .6rem center;
+  background-size:10px 6px;
 }
 
-/* ---------- SPINNER ---------- */
+/* ────────────────────────────────────────────────────────────────
+   SPINNER
+   ────────────────────────────────────────────────────────────── */
 @keyframes spin{to{transform:rotate(360deg);}}
 .spinner{
-  display:inline-block;width:24px;height:24px;border:3px solid var(--border);
-  border-top-color:var(--primary);border-radius:50%;animation:spin 1s linear infinite;
+  display:inline-block;
+  width:24px;
+  height:24px;
+  border:3px solid var(--border);
+  border-top-color:var(--primary);
+  border-radius:50%;
+  animation:spin 1s linear infinite;
   margin:auto;
 }
 
-/* ---------- MODAL ---------- */
+/* ────────────────────────────────────────────────────────────────
+   MODALS
+   ────────────────────────────────────────────────────────────── */
 .modal-overlay{
-  position:fixed;inset:0;background:rgba(0,0,0,.45);
-  display:flex;align-items:center;justify-content:center;z-index:3000;
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.45);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:3000;
 }
 .modal-dialog{
-  background:var(--card-bg);border-radius:12px;max-height:90vh;overflow:auto;
-  padding:1.6rem 2rem;position:relative;
+  background:var(--card-bg);
+  border-radius:12px;
+  max-height:90vh;
+  overflow:auto;
+  padding:1.6rem 2rem;
+  position:relative;
   box-shadow:0 15px 45px rgba(0,0,0,.25);
 }
 .modal-close{
-  position:absolute;top:.6rem;right:.9rem;border:none;background:none;
-  font-size:1.8rem;line-height:1;cursor:pointer;color:var(--text-light);
+  position:absolute;
+  top:.6rem;
+  right:.9rem;
+  border:none;
+  background:none;
+  font-size:1.8rem;
+  line-height:1;
+  cursor:pointer;
+  color:var(--text-light);
 }
 body.modal-open{overflow:hidden;}
 
-/* ---------- “EDIT VALUES” FAB ---------- */
+/* ────────────────────────────────────────────────────────────────
+   “EDIT VALUES” floating button
+   ────────────────────────────────────────────────────────────── */
 .ovr-wrapper{position:relative;}
 .edit-fab{
-  position:absolute;top:6px;right:6px;z-index:10;
-  padding:.35rem .9rem;font-size:.8rem;line-height:1.1;
+  position:absolute;
+  top:6px;
+  right:6px;
+  z-index:10;
+  padding:.35rem .9rem;
+  font-size:.8rem;
+  line-height:1.1;
 }
-
-/* ---------- UTIL ---------- */
-.text-light{color:var(--text-light);}
-.truncate{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 
 /* ────────────────────────────────────────────────────────────────
    YAML TREE EDITOR  –  Friendly UX
    ────────────────────────────────────────────────────────────── */
-
-.yaml-tree-block{margin:.5rem 0;}
-.yaml-tree-block.root{
-  margin-top:1.4rem;padding-top:.8rem;border-top:1px solid var(--border);
+.yaml-tree-block{
+  margin:.5rem 0;
+  position:relative;
 }
-.yaml-tree-block.root:first-of-type{border-top:none;margin-top:0;padding-top:0;}
+.yaml-tree-block.root{             /* top-level keys get extra gap */
+  margin-top:1.6rem;
+  padding-top:.9rem;
+  border-top:1px solid var(--border);
+}
+.yaml-tree-block.root:first-of-type{
+  border-top:none;
+  margin-top:0;
+  padding-top:0;
+}
 
 .yaml-tree-row{
-  display:flex;flex-wrap:wrap;align-items:flex-start;gap:1rem;
+  display:flex;
+  flex-wrap:wrap;
+  align-items:flex-start;
+  gap:1rem;
 }
-.yaml-tree-key{min-width:180px;font-weight:600;}
-.yaml-tree-input{
-  flex:1 1 380px;min-width:240px;padding:.45rem .7rem;
-  border:1px solid var(--border);border-radius:6px;
-  background:var(--card-bg);color:var(--text);
-}
-.yaml-help{
-  flex-basis:100%;margin:.25rem 0 0 calc(180px + 1rem);
-  font-size:.8rem;line-height:1.4;color:var(--text-light);
+.yaml-toggle,
+.yaml-toggle-spacer{
+  width:18px;
+  flex:0 0 18px;
 }
 .yaml-toggle{
-  width:18px;border:none;background:transparent;cursor:pointer;line-height:1;font-weight:700;
+  border:none;
+  background:transparent;
+  cursor:pointer;
+  font-weight:700;
+  line-height:1;
 }
+.yaml-toggle-spacer{display:inline-block;}
+
+.yaml-tree-key{
+  min-width:180px;
+  font-weight:600;
+}
+.yaml-tree-input{
+  flex:1 1 380px;
+  min-width:240px;
+  padding:.45rem .7rem;
+  border:1px solid var(--border);
+  border-radius:6px;
+  background:var(--card-bg);
+  color:var(--text);
+}
+
+.yaml-tree-block:hover{
+  background:rgba(0,0,0,.035);
+}
+[data-theme='dark'] .yaml-tree-block:hover{
+  background:rgba(255,255,255,.04);
+}
+
+/* inline help → tooltip on hover */
+.yaml-help{
+  display:none;
+  position:absolute;
+  top:100%;
+  left:calc(198px + 18px); /* toggle + key width */
+  margin-top:.35rem;
+  padding:.5rem .7rem;
+  max-width:360px;
+  background:var(--card-bg);
+  border:1px solid var(--border);
+  border-radius:8px;
+  color:var(--text-light);
+  font-size:.8rem;
+  line-height:1.4;
+  box-shadow:0 4px 14px rgba(0,0,0,.15);
+  z-index:50;
+}
+.yaml-tree-block:hover .yaml-help{display:block;}
+
+/* make space below tree so “Install” isn’t glued */
+.yaml-tree-container{
+  margin-bottom:1.5rem;
+}
+
+/* ────────────────────────────────────────────────────────────────
+   UTILITIES
+   ────────────────────────────────────────────────────────────── */
+.text-light{color:var(--text-light);}
+.truncate{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
