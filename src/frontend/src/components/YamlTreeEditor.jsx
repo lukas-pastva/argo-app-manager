@@ -1,18 +1,19 @@
 /*  YamlTreeEditor.jsx – v4
-    Friendly UX editor where the *whole line* of an object/array
-    toggles expand/collapse on click (not just the ＋ / − icon),
-    while primitive rows remain editable.
+    Friendly UX editor where the entire line toggles expansion,
+    help text appears only when hovering the ℹ icon, and hover
+    tint covers the full width/height of the row.
 */
 import React, { useState, useCallback, useMemo, useRef } from "react";
 import yaml from "js-yaml";
 
 /* helpers ------------------------------------------------------ */
-const clone = o => JSON.parse(JSON.stringify(o));
+const deepClone = o => JSON.parse(JSON.stringify(o));
 
+/* pull “# …” comments that sit directly above a key */
 function extractHelp(src = "") {
   const lines = src.split(/\r?\n/);
   const stack = [];
-  const map   = new Map();
+  const map = new Map();
   let buf = [];
 
   const flush = p => {
@@ -29,7 +30,7 @@ function extractHelp(src = "") {
     const km = l.match(/^(\s*)([\w.-]+):/);
     if (!km) { buf = []; return; }
 
-    const d = km[1].length / 2;
+    const d = km[1].length / 2;   /* 2-space indent */
     stack.length = d;
     stack[d] = km[2];
     flush(stack.slice(0, d + 1).join("."));
@@ -46,25 +47,23 @@ export default function YamlTreeEditor({ yamlText = "", onChange }) {
   });
   const helps = useMemo(() => extractHelp(yamlText), [yamlText]);
 
-  /* expand / collapse */
-  const [expanded, setExp] = useState(new Set());
+  /* expansion state */
+  const [expanded, setExpanded] = useState(new Set());
   const rootRef = useRef(null);
 
   const toggle = useCallback(path => {
     const y = rootRef.current?.scrollTop || 0;
-    setExp(s => {
-      const nxt = new Set(s);
-      nxt.has(path) ? nxt.delete(path) : nxt.add(path);
-      return nxt;
+    setExpanded(s => {
+      const n = new Set(s);
+      n.has(path) ? n.delete(path) : n.add(path);
+      return n;
     });
-    requestAnimationFrame(() => {
-      if (rootRef.current) rootRef.current.scrollTop = y;
-    });
+    requestAnimationFrame(() => rootRef.current && (rootRef.current.scrollTop = y));
   }, []);
 
-  /* write helper */
+  /* mutate helper */
   const write = useCallback((arr, val) => {
-    const nxt = clone(tree);
+    const nxt = deepClone(tree);
     let ptr = nxt;
     arr.slice(0, -1).forEach(k => (ptr = ptr[k]));
     ptr[arr.at(-1)] = val;
@@ -72,14 +71,14 @@ export default function YamlTreeEditor({ yamlText = "", onChange }) {
     onChange?.(yaml.dump(nxt, { noRefs: true }));
   }, [tree, onChange]);
 
-  /* node renderer */
+  /* renderer */
   const Node = ({ k, v, depth, path }) => {
     const indent = { paddingLeft: depth * 16 };
-    const isObj = v && typeof v === "object";
+    const isObj = v && typeof v === "object" && !Array.isArray(v);
     const isArr = Array.isArray(v);
 
     /* OBJECT / ARRAY ------------------------------------------ */
-    if (isObj && !isArr) {
+    if (isObj || isArr) {
       const open = expanded.has(path);
       return (
         <div className={`yaml-tree-block ${depth === 0 ? "root" : ""}`} style={indent}>
@@ -92,39 +91,29 @@ export default function YamlTreeEditor({ yamlText = "", onChange }) {
               {open ? "−" : "＋"}
             </button>
             <strong className="yaml-tree-key">{k}</strong>
+            {isArr && ` [${v.length}]`}
+            {helps.has(path) && (
+              <>
+                <span
+                  className="yaml-help-icon"
+                  onClick={e => e.stopPropagation()}
+                >
+                  ℹ
+                </span>
+                <div className="yaml-help">{helps.get(path)}</div>
+              </>
+            )}
           </div>
 
-          {open &&
-            Object.entries(v).map(([ck, cv]) => (
-              <Node key={ck} k={ck} v={cv} depth={depth + 1} path={`${path}.${ck}`} />
-            ))}
-
-          {helps.has(path) && <div className="yaml-help">{helps.get(path)}</div>}
-        </div>
-      );
-    }
-
-    if (isArr) {
-      const open = expanded.has(path);
-      return (
-        <div className={`yaml-tree-block ${depth === 0 ? "root" : ""}`} style={indent}>
-          <div className="yaml-tree-row clickable" onClick={() => toggle(path)}>
-            <button
-              className="yaml-toggle"
-              onClick={e => { e.stopPropagation(); toggle(path); }}
-              aria-label={open ? "collapse" : "expand"}
-            >
-              {open ? "−" : "＋"}
-            </button>
-            <strong className="yaml-tree-key">{k}</strong>&nbsp;[{v.length}]
-          </div>
-
-          {open &&
-            v.map((item, i) => (
-              <Node key={i} k={i} v={item} depth={depth + 1} path={`${path}.${i}`} />
-            ))}
-
-          {helps.has(path) && <div className="yaml-help">{helps.get(path)}</div>}
+          {open && (
+            isObj
+              ? Object.entries(v).map(([ck, cv]) => (
+                  <Node key={ck} k={ck} v={cv} depth={depth + 1} path={`${path}.${ck}`} />
+                ))
+              : v.map((item, i) => (
+                  <Node key={i} k={i} v={item} depth={depth + 1} path={`${path}.${i}`} />
+                ))
+          )}
         </div>
       );
     }
@@ -157,8 +146,13 @@ export default function YamlTreeEditor({ yamlText = "", onChange }) {
           <span className="yaml-toggle-spacer" />
           <span className="yaml-tree-key">{k}</span>
           {input}
+          {helps.has(path) && (
+            <>
+              <span className="yaml-help-icon">ℹ</span>
+              <div className="yaml-help">{helps.get(path)}</div>
+            </>
+          )}
         </div>
-        {helps.has(path) && <div className="yaml-help">{helps.get(path)}</div>}
       </div>
     );
   };
