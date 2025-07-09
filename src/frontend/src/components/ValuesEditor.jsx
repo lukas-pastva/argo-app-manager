@@ -1,18 +1,21 @@
 /*  ValuesEditor.jsx
     ───────────────────────────────────────────────────────────────
-    “Install chart” flow – works automatically with either
-      • external charts  → 1-field  (name)
-      • internal charts  → 3-fields (team, env, applicationCode)
+    “Install chart” flow – now with an optional *friendly* UI that
+    turns YAML into a graphical form (see YamlTreeEditor).
 
-    The backend tells us which style to use through /api/install-style and the
-    parent (<App/>) passes it in as `installStyle` (“name” | “trio”).
+    New bits:
+      • <input type="checkbox"> “Switch to Friendly User Experience”
+      • When enabled  → hides Monaco editor, shows YamlTreeEditor
+      • All edits sync back to the underlying YAML (ymlRef.current)
 */
 
 import React, { useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
 import Spinner from "./Spinner.jsx";
+import YamlTreeEditor from "./YamlTreeEditor.jsx";   // ← NEW
+import yaml from "js-yaml";
 
-/* ── tiny fetch helpers ───────────────────────────────────────── */
+/* ─── tiny fetch helpers ─────────────────────────────────────── */
 async function fetchSmart(url, opts = {}) {
   const res = await fetch(url, opts);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -36,7 +39,6 @@ const fmtDate = iso => {
 };
 
 /* ─────────────────────────────────────────────────────────────── */
-
 export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
   /* ───────────────── fixed style (no dropdown) ─────────────── */
   const style = installStyle === "trio" ? "trio" : "name";
@@ -53,9 +55,13 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
   const [env,     setEnv  ] = useState("");
   const [appCode, setCode ] = useState("");
 
-  const [preview,      setPre] = useState(null);  // { delta } | null
-  const [downloadOnly, setDL ] = useState(false);
-  const [full,         setFull] = useState(false); // full-screen editor?
+  const [preview,      setPre]   = useState(null);  // { delta } | null
+  const [downloadOnly, setDL ]   = useState(false);
+  const [full,         setFull ] = useState(false);
+  const [friendly,     setFr ]   = useState(false); // ← NEW
+
+  /* when friendly mode is on, this keeps the latest YAML ------- */
+  const [treeYaml, setTreeYaml] = useState("");
 
   /* ───────────────── monaco refs ────────────────────────────── */
   const edDivRef = useRef(null);
@@ -84,6 +90,7 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
           setInit(yml);
           ymlRef.current = yml;
           setBusy(false);
+          if (friendly) setTreeYaml(yml);          // sync if mode was on
         }
       } catch {
         if (!cancelled) {
@@ -91,16 +98,17 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
           setInit(msg);
           ymlRef.current = msg;
           setBusy(false);
+          if (friendly) setTreeYaml(msg);
         }
       }
     })();
 
     return () => { cancelled = true; };
-  }, [chart.packageId, ver]);
+  }, [chart.packageId, ver, friendly]);
 
   /* ─── mount Monaco once ───────────────────────────────────── */
   useEffect(() => {
-    if (busy || !edDivRef.current || edRef.current) return;
+    if (busy || !edDivRef.current || edRef.current || friendly) return;
     edRef.current = monaco.editor.create(edDivRef.current, {
       value           : initVals,
       language        : "yaml",
@@ -111,9 +119,9 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
       ymlRef.current = edRef.current.getValue();
     });
     return () => edRef.current?.dispose();
-  }, [busy, initVals]);
+  }, [busy, initVals, friendly]);
 
-  /* ─── keep layout fresh when modals close ─────────────────── */
+  /* ─── keep layout fresh when modals close / fs exit ───────── */
   useEffect(() => { if (!preview && edRef.current) edRef.current.layout(); }, [preview]);
   useEffect(() => {
     if (!full && edRef.current) {
@@ -122,7 +130,7 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
     }
   }, [full]);
 
-  /* ───────────────── full-screen editor ────────────────────── */
+  /* ───────────────── full-screen editor (unchanged) ────────── */
   function FullscreenEditor() {
     const ref = useRef(null);
     useEffect(() => {
@@ -161,7 +169,7 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
     );
   }
 
-  /* ───────────────── YAML-Δ preview helper ─────────────────── */
+  /* ───────────────── YAML-Δ preview helper (unchanged) ─────── */
   async function openPreview() {
     if (downloadOnly) { deploy(""); return; }
     setBusy(true);
@@ -183,7 +191,7 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
     }
   }
 
-  /* ───────────────── deploy / download helper ──────────────── */
+  /* ───────────────── deploy / download helper (unchanged) ──── */
   async function deploy(deltaOverride) {
     const deltaStr =
       (deltaOverride ?? (preview?.delta || "").trim()) || "# (no overrides)";
@@ -234,7 +242,7 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
     onBack();
   }
 
-  /* ───────────────── preview modal ─────────────────────────── */
+  /* ───────────────── preview modal (unchanged) ─────────────── */
   function PreviewModal() {
     const mRef = useRef(null);
     useEffect(() => {
@@ -276,7 +284,7 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
     );
   }
 
-  /* ───────────────── header helper ─────────────────────────── */
+  /* ───────────────── header helper (unchanged) ─────────────── */
   function ChartHeader() {
     return (
       <div style={{ display: "flex", alignItems: "flex-start", gap: "1rem", marginBottom: "1.1rem" }}>
@@ -307,12 +315,13 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
     );
   }
 
-  /* ───────────────── render ────────────────────────────────── */
+  /* ───────────────── readiness checks ───────────────────────── */
   const namesOk =
     style === "name"
       ? Boolean(name.trim())
       : team.trim() && env.trim() && appCode.trim();
 
+  /* ───────────────── render ─────────────────────────────────── */
   return (
     <>
       {preview && <PreviewModal />}
@@ -385,12 +394,44 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
         <span>I only want to download this Helm chart (do not install)</span>
       </label>
 
-      {/* yaml editor (hidden for download-only) */}
+      {/* FRIENDLY-MODE toggle (NEW) */}
+      {!downloadOnly && (
+        <label style={{ marginTop: ".6rem", display: "flex", gap: ".5rem" }}>
+          <input
+            type="checkbox"
+            checked={friendly}
+            onChange={e => {
+              const checked = e.target.checked;
+              if (checked) {
+                /* switching *to* friendly → seed tree editor */
+                setTreeYaml(ymlRef.current);
+              } else {
+                /* switching back → sync latest tree edits to Monaco */
+                ymlRef.current = treeYaml;
+                if (edRef.current) edRef.current.setValue(ymlRef.current);
+              }
+              setFr(checked);
+            }}
+            style={{ transform: "translateY(2px)" }}
+          />
+          <span>Switch to Friendly User Experience</span>
+        </label>
+      )}
+
+      {/* editor area (YAML or tree) */}
       {!downloadOnly && (
         busy ? (
           <div style={{ height: "52vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <Spinner size={36} />
           </div>
+        ) : friendly ? (
+          <YamlTreeEditor
+            yamlText={treeYaml}
+            onChange={txt => {
+              setTreeYaml(txt);
+              ymlRef.current = txt;
+            }}
+          />
         ) : (
           <div style={{ position: "relative" }}>
             <button
