@@ -32,7 +32,7 @@ function chartInfo(app) {
 
 /* ─────────────────────────────────────────────────────────────── */
 
-export default function AppDetails({ project, file, app, onClose }) {
+export default function AppDetails({ project, file, app, onClose, onNotify = () => {} }) {
   /* state ------------------------------------------------------- */
   const [vals, setVals]     = useState({ defaultValues: "", overrideValues: "", meta: {} });
   const [loading, setLoad]  = useState(true);
@@ -129,7 +129,7 @@ export default function AppDetails({ project, file, app, onClose }) {
       setPrev({ delta });
     } catch (e) {
       console.error("Δ-preview error:", e);
-      alert("Could not compute YAML delta – see console.");
+      onNotify("error", "Could not compute YAML delta.", "See console for details.");
     } finally {
       setBusy(false);
     }
@@ -143,7 +143,7 @@ export default function AppDetails({ project, file, app, onClose }) {
     const releaseName = appId(app);
 
     try {
-      await fetch("/api/upgrade", {
+      const resp = await fetch("/api/upgrade", {
         method  : "POST",
         headers : { "Content-Type": "application/json" },
         body    : JSON.stringify({
@@ -154,16 +154,16 @@ export default function AppDetails({ project, file, app, onClose }) {
           namespace      : ns,
           userValuesYaml : yamlRef.current,
         }),
-      }).then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
       });
 
-      alert("Upgrade triggered!");
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+      onNotify("success", "Upgrade triggered!", releaseName);
       setEdit(false);
       setPrev(null);
     } catch (e) {
       console.error("upgrade error:", e);
-      alert(`Upgrade failed – ${e.message}`);
+      onNotify("error", "Upgrade failed.", e.message);
     } finally {
       setBusy(false);
     }

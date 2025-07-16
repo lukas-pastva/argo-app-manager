@@ -138,6 +138,15 @@ select{width:100%;padding:.55rem .8rem;border:1px solid var(--border);border-rad
   font-size:1.8rem;line-height:1;cursor:pointer;color:var(--text-light);}
 body.modal-open{overflow:hidden;}
 
+/* --- Notice modal variants (success / error / info) ------------- */
+.notice-modal{max-width:420px;text-align:center;padding:2.2rem 2.4rem;}
+.notice-modal .notice-icon{font-size:3rem;line-height:1;display:block;margin-bottom:.6rem;}
+.notice-modal.success .notice-icon{color:#2e8b57;}
+.notice-modal.error   .notice-icon{color:#d0392e;}
+.notice-modal.info    .notice-icon{color:var(--primary);}
+.notice-modal p{margin:0;font-size:1.05rem;}
+.notice-modal small{display:block;margin-top:.8rem;font-size:.85rem;color:var(--text-light);}
+
 /* ────────────────────────────────────────────────────────────────
    “EDIT VALUES” Floating Button
    ────────────────────────────────────────────────────────────── */

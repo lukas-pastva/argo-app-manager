@@ -17,7 +17,7 @@ function appId(app = {}) {
 
 /* ─────────────────────────────────────────────────────────────── */
 
-export default function AppsList({ file }) {
+export default function AppsList({ file, onNotify = () => {} }) {
   const [flat,  setFlat]  = useState([]);
   const [sel,   setSel]   = useState(null);   // { project,file,app } | null
   const [busy,  setBusy]  = useState(true);
@@ -119,7 +119,7 @@ export default function AppsList({ file }) {
         </section>
       ))}
 
-      {sel && <AppDetails {...sel} onClose={closeDetail} />}
+      {sel && <AppDetails {...sel} onClose={closeDetail} onNotify={onNotify} />}
     </>
   );
 }
