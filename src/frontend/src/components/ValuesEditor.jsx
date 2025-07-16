@@ -39,7 +39,12 @@ const fmtDate = iso => {
 };
 
 /* ─────────────────────────────────────────────────────────────── */
-export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
+export default function ValuesEditor({
+  chart,
+  installStyle = "name",
+  onBack,
+  onNotify = () => {},
+}) {
   /* ───────────────── fixed style (no dropdown) ─────────────── */
   const style = installStyle === "trio" ? "trio" : "name";
 
@@ -138,7 +143,7 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
       setPre({ delta });
     } catch (e) {
       console.error("Δ-preview failed:", e);
-      alert("Unable to compute YAML delta.");
+      onNotify("error", "Unable to compute YAML delta.", e.message);
     } finally {
       setBusy(false);
     }
@@ -182,14 +187,32 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
     const endpoint = downloadOnly ? "/api/download" : "/api/apps";
 
     setBusy(true);
-    await fetch(endpoint, {
-      method  : "POST",
-      headers : { "Content-Type": "application/json" },
-      body    : JSON.stringify(payload),
-    });
+    let ok = true;
+    try {
+      const resp = await fetch(endpoint, {
+        method  : "POST",
+        headers : { "Content-Type": "application/json" },
+        body    : JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        ok = false;
+        throw new Error(`HTTP ${resp.status}`);
+      }
+    } catch (e) {
+      console.error("deploy error:", e);
+      onNotify("error", downloadOnly ? "Download request failed." : "Install request failed.", e.message);
+      setBusy(false);
+      return;
+    }
     setBusy(false);
 
-    alert(downloadOnly ? "Download request sent!" : "Install request sent!");
+    if (ok) {
+      onNotify(
+        "success",
+        downloadOnly ? "Download request sent!" : "Install request sent!",
+        release
+      );
+    }
     onBack();
   }
 
@@ -404,7 +427,7 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
   );
 
   /* ────────────────────────────────────────────────────────────
-     Preview modal (unchanged)
+     Preview modal (unchanged apart from alert→onNotify)
      ─────────────────────────────────────────────────────────── */
   function PreviewModal() {
     const mRef = useRef(null);
@@ -418,7 +441,7 @@ export default function ValuesEditor({ chart, installStyle = "name", onBack }) {
         minimap         : { enabled: false },
       });
       return () => e.dispose();
-    }, []);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
     return (
       <div className="modal-overlay" onClick={() => setPre(null)}>
         <div className="modal-dialog" style={{ width: "64vw", maxWidth: 900 }}

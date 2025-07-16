@@ -6,6 +6,7 @@ import ThemeToggle  from "./components/ThemeToggle.jsx";
 import AppsList     from "./components/AppsList.jsx";
 import ChartSearch  from "./components/ChartSearch.jsx";
 import ValuesEditor from "./components/ValuesEditor.jsx";
+import Notice       from "./components/Notice.jsx";
 
 /* ─── tiny helpers for URL search-param handling ─────────────── */
 function readSearch()  { return new URLSearchParams(window.location.search); }
@@ -17,6 +18,13 @@ export default function App() {
   const [chart,        setChart]   = useState(null);
   const [adding,       setAdd]     = useState(false);
   const [installStyle, setStyle]   = useState("name");   // auto-detected
+
+  /* centralised notice state ----------------------------------- */
+  const [notice, setNotice] = useState(null);            // {type,message,sub}
+
+  const notify = (type, message, sub = "") => {
+    setNotice({ type, message, sub });
+  };
 
   /* ─── fetch style once on boot ─────────────────────────────── */
   useEffect(() => {
@@ -64,18 +72,32 @@ export default function App() {
       </button>
 
       {!adding ? (
-        <AppsList file={activeFile} />                     /* normal view */
+        /* normal view ------------------------------------------------------ */
+        <AppsList file={activeFile} onNotify={notify} />
       ) : chart ? (
+        /* install flow ----------------------------------------------------- */
         <ValuesEditor
           chart={chart}
-          installStyle={installStyle}                      /* ← auto */
+          installStyle={installStyle}  /* ← auto */
           onBack={exitInstall}
+          onNotify={notify}
         />
       ) : (
+        /* choose chart ----------------------------------------------------- */
         <>
           <button className="btn-secondary btn-back" onClick={exitInstall}>← Back</button>
           <ChartSearch onSelect={setChart} />
         </>
+      )}
+
+      {/* global notice modal */}
+      {notice && (
+        <Notice
+          type={notice.type}
+          message={notice.message}
+          sub={notice.sub}
+          onClose={() => setNotice(null)}
+        />
       )}
     </div>
   );

@@ -32,7 +32,13 @@ function chartInfo(app) {
 
 /* ─────────────────────────────────────────────────────────────── */
 
-export default function AppDetails({ project, file, app, onClose, onNotify = () => {} }) {
+export default function AppDetails({
+  project,
+  file,
+  app,
+  onClose,
+  onNotify = () => {},
+}) {
   /* state ------------------------------------------------------- */
   const [vals, setVals]     = useState({ defaultValues: "", overrideValues: "", meta: {} });
   const [loading, setLoad]  = useState(true);
@@ -183,7 +189,7 @@ export default function AppDetails({ project, file, app, onClose, onNotify = () 
         minimap         : { enabled: false },
       });
       return () => e.dispose();
-    }, []);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     return (
       <div className="modal-overlay" onClick={() => setPrev(null)}>
@@ -376,13 +382,13 @@ export default function AppDetails({ project, file, app, onClose, onNotify = () 
                     <button
                       className="btn-secondary edit-fab"
                       onClick={() => {
-                        if (
-                          window.confirm(
-                            "Editing override values will trigger a Helm upgrade of this release. Continue?"
-                          )
-                        ) {
-                          setEdit(true);
-                        }
+                        /* previously window.confirm(); now soft notice */
+                        onNotify(
+                          "info",
+                          "Editing override values",
+                          "Changes are applied via Helm upgrade when saved."
+                        );
+                        setEdit(true);
                       }}
                     >
                       Edit
