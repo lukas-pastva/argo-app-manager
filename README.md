@@ -112,6 +112,3 @@ Open <http://localhost:8080>
 }
 ```
 
----
-
-© 2025 Argo App Manager • MIT
