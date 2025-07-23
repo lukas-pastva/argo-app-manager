@@ -5,7 +5,7 @@
 
     Key bits
       • Checkbox “Switch to Friendly User Experience”
-      • FRIENDLY ON  → hides Monaco, shows YamlTreeEditor
+      • Checkbox “I only want to download…”
       • Both editors can be maximised to full‑screen
 */
 
@@ -124,9 +124,17 @@ export default function ValuesEditor({
     };
   }, [chart.packageId, ver, friendly]);
 
-  /* ─── mount Monaco once ───────────────────────────────────── */
+  /* ─── create Monaco (re‑runs when DL / friendly switch) ───── */
   useEffect(() => {
-    if (busy || !edDivRef.current || edRef.current || friendly) return;
+    if (
+      busy ||
+      downloadOnly ||              // hidden ⇒ don’t create
+      friendly ||                  // hidden ⇒ don’t create
+      !edDivRef.current ||
+      edRef.current
+    )
+      return;
+
     edRef.current = monaco.editor.create(edDivRef.current, {
       value: initVals,
       language: "yaml",
@@ -136,18 +144,23 @@ export default function ValuesEditor({
     edRef.current.onDidChangeModelContent(() => {
       ymlRef.current = edRef.current.getValue();
     });
+
     return () => edRef.current?.dispose();
-  }, [busy, initVals, friendly]);
+  }, [busy, initVals, friendly, downloadOnly]);
 
-  /* ─── keep Monaco layout fresh after modals close ─────────── */
+  /* ─── keep Monaco fresh when coming *back* ------------------- */
   useEffect(() => {
-    if (!preview && edRef.current) edRef.current.layout();
-  }, [preview]);
+    if (!friendly && !downloadOnly && edRef.current) edRef.current.layout();
+  }, [friendly, downloadOnly]);
 
-  /* ─── **NEW** – relayout Monaco when switching *back* from Friendly UI */
+  /* ─── dispose Monaco while in download‑only mode ------------- */
   useEffect(() => {
-    if (!friendly && edRef.current) edRef.current.layout();
-  }, [friendly]);
+    if (downloadOnly && edRef.current) {
+      ymlRef.current = edRef.current.getValue(); // preserve edits
+      edRef.current.dispose();
+      edRef.current = null;
+    }
+  }, [downloadOnly]);
 
   /* ────────────────────────────────────────────────────────────
      Helpers (preview Δ  /  deploy  /  Monaco‑full)
@@ -488,7 +501,6 @@ export default function ValuesEditor({
                 ymlRef.current = treeYaml;
                 if (edRef.current) {
                   edRef.current.setValue(ymlRef.current);
-                  /* ensure repaint when Monaco comes back */
                   edRef.current.layout();
                 }
               }
