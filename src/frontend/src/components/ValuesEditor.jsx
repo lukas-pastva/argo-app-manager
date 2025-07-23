@@ -1,17 +1,20 @@
 /*  ValuesEditor.jsx
     ───────────────────────────────────────────────────────────────
-    “Install chart” flow – with an optional *friendly* UI that
-    turns YAML into a graphical form (YamlTreeEditor).
+    “Install chart” flow – supports:
 
-    Key bits
-      • Checkbox “Switch to Friendly User Experience”
-      • Checkbox “I only want to download…”
-      • Both editors can be maximised to full‑screen
+      • Plain YAML editing with Monaco
+      • Friendly form editing (YamlTreeEditor)
+      • Download‑only mode (no values editor)
+      • Full‑screen editors
+
+    This revision fixes the “blank area” bug by **always destroying
+    Monaco when it’s hidden and rebuilding it with the latest YAML
+    when it becomes visible again**.
 */
 
 import React, { useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
-import yaml from "js-yaml";
+import yaml from "js-yaml";               // (still used by YamlTreeEditor)
 import Spinner from "./Spinner.jsx";
 import YamlTreeEditor from "./YamlTreeEditor.jsx";
 
@@ -22,6 +25,7 @@ async function fetchSmart(url, opts = {}) {
   const ct = res.headers.get("content-type") || "";
   return ct.includes("json") ? res.json() : res.text();
 }
+
 function useFetch(url, deps, cb) {
   useEffect(() => {
     if (!url) return;
@@ -30,13 +34,14 @@ function useFetch(url, deps, cb) {
       try {
         cb(await fetchSmart(url, { signal: ctrl.signal }));
       } catch {
-        /* ignore */
+        /* silent */
       }
     })();
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 }
+
 const fmtDate = (iso) => {
   const d = new Date(iso);
   return isNaN(d) ? "" : d.toISOString().slice(0, 10);
@@ -49,49 +54,51 @@ export default function ValuesEditor({
   onBack,
   onNotify = () => {},
 }) {
-  /* ───────────────── fixed style (no dropdown) ─────────────── */
+  /* ───────── fixed style (cluster‑wide convention) ─────────── */
   const style = installStyle === "trio" ? "trio" : "name";
 
-  /* ───────────────── chart versions / defaults ─────────────── */
+  /* ───────── chart versions & defaults ─────────────────────── */
   const [versions, setVers] = useState([]);
-  const [ver, setVer] = useState("");
+  const [ver, setVer]       = useState("");
   const [initVals, setInit] = useState("");
-  const [busy, setBusy] = useState(true);
+  const [busy, setBusy]     = useState(true);
 
-  /* ───────────────── form inputs ────────────────────────────── */
-  const [name, setName] = useState(chart.name); // style=name
-  const [team, setTeam] = useState(""); // style=trio
-  const [env, setEnv] = useState("");
-  const [appCode, setCode] = useState("");
+  /* ───────── identifiers (name style / trio style) ─────────── */
+  const [name,    setName ] = useState(chart.name);
+  const [team,    setTeam ] = useState("");
+  const [env,     setEnv  ] = useState("");
+  const [appCode, setCode ] = useState("");
 
-  /* ───────────────── misc state ─────────────────────────────── */
-  const [preview, setPre] = useState(null); // { delta } | null
+  /* ───────── misc state ────────────────────────────────────── */
+  const [preview,   setPre ]  = useState(null);   // { delta }
   const [downloadOnly, setDL] = useState(false);
-  const [full, setFull] = useState(false); // Monaco full‑screen
-  const [friendly, setFr] = useState(false); // friendly ON / OFF
-  const [treeFull, setTFull] = useState(false); // Tree full‑screen
+  const [friendly, setFr]     = useState(false);
+  const [full,   setFull]     = useState(false);  // Monaco FS
+  const [treeFS, setTFS]      = useState(false);  // Tree FS
 
-  /*  friendly YAML mirror  */
+  /* UI‑state mirrors */
   const [treeYaml, setTreeYaml] = useState("");
 
-  /* ───────────────── monaco refs ────────────────────────────── */
-  const edDivRef = useRef(null);
-  const edRef = useRef(null);
-  const ymlRef = useRef("");
+  /* ───────── refs ──────────────────────────────────────────── */
+  const edDivRef = useRef(null);   // mount point for Monaco
+  const edRef    = useRef(null);   // Monaco instance
+  const ymlRef   = useRef("");     // current YAML text
 
-  /* ─── fetch versions once ─────────────────────────────────── */
+  /* ════════════════════════════════════════════════════════════
+     1.  Fetch chart versions once
+     ═══════════════════════════════════════════════════════════ */
   useFetch(
-    `/api/chart/versions?owner=${encodeURIComponent(
-      chart.repoName
-    )}&chart=${encodeURIComponent(chart.name)}`,
+    `/api/chart/versions?owner=${encodeURIComponent(chart.repoName)}&chart=${encodeURIComponent(chart.name)}`,
     [chart.name, chart.repoName],
     (arr = []) => {
       setVers(arr);
       setVer(arr[0]?.version || "");
-    }
+    },
   );
 
-  /* ─── fetch default values whenever version changes ───────── */
+  /* ════════════════════════════════════════════════════════════
+     2.  Fetch default values whenever version changes
+     ═══════════════════════════════════════════════════════════ */
   useEffect(() => {
     if (!ver) return;
     let cancelled = false;
@@ -100,12 +107,11 @@ export default function ValuesEditor({
       setBusy(true);
       try {
         const yml = await fetchSmart(
-          `/api/chart/values?pkgId=${chart.packageId}&version=${ver}`
+          `/api/chart/values?pkgId=${chart.packageId}&version=${ver}`,
         );
         if (!cancelled) {
           setInit(yml);
           ymlRef.current = yml;
-          setBusy(false);
           if (friendly) setTreeYaml(yml);
         }
       } catch {
@@ -113,110 +119,87 @@ export default function ValuesEditor({
           const msg = "# (no default values found)";
           setInit(msg);
           ymlRef.current = msg;
-          setBusy(false);
           if (friendly) setTreeYaml(msg);
         }
+      } finally {
+        if (!cancelled) setBusy(false);
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [chart.packageId, ver, friendly]);
 
-  /* ─── (re)create Monaco when visible ------------------------ */
+  /* ════════════════════════════════════════════════════════════
+     3.  Create / dispose Monaco depending on visibility
+     ═══════════════════════════════════════════════════════════ */
   useEffect(() => {
-    if (
-      busy ||
-      downloadOnly ||
-      friendly ||
-      !edDivRef.current ||
-      edRef.current
-    )
-      return;
+    const visible = !busy && !downloadOnly && !friendly;
 
-    edRef.current = monaco.editor.create(edDivRef.current, {
-      value: initVals,
-      language: "yaml",
-      automaticLayout: true,
-      minimap: { enabled: false },
-    });
-    edRef.current.onDidChangeModelContent(() => {
-      ymlRef.current = edRef.current.getValue();
-    });
-
-    return () => edRef.current?.dispose();
-  }, [busy, initVals, friendly, downloadOnly]);
-
-  /* ─── dispose Monaco when hidden (DL or Friendly) ----------- */
-  useEffect(() => {
-    if ((downloadOnly || friendly) && edRef.current) {
-      ymlRef.current = edRef.current.getValue(); // preserve edits
+    /* dispose if should be hidden */
+    if (!visible && edRef.current) {
+      ymlRef.current = edRef.current.getValue();   // preserve edits
       edRef.current.dispose();
       edRef.current = null;
     }
-  }, [downloadOnly, friendly]);
 
-  /* ─── force repaint when we bring Monaco back ---------------- */
-  useEffect(() => {
-    if (!friendly && !downloadOnly && edRef.current) edRef.current.layout();
-  }, [friendly, downloadOnly]);
-
-  /* ────────────────────────────────────────────────────────────
-     Helpers (preview Δ  /  deploy  /  Monaco‑full)
-     ─────────────────────────────────────────────────────────── */
-  async function openPreview() {
-    if (downloadOnly) {
-      deploy("");
-      return;
+    /* create if visible & not yet created */
+    if (visible && edDivRef.current && !edRef.current) {
+      edRef.current = monaco.editor.create(edDivRef.current, {
+        value           : ymlRef.current || initVals,
+        language        : "yaml",
+        automaticLayout : true,
+        minimap         : { enabled: false },
+      });
+      edRef.current.onDidChangeModelContent(() => {
+        ymlRef.current = edRef.current.getValue();
+      });
     }
+
+    /* repaint every time we (re)show it */
+    if (visible && edRef.current) edRef.current.layout();
+  }, [busy, downloadOnly, friendly, initVals]);
+
+  /* ════════════════════════════════════════════════════════════
+     4.  Helpers (preview Δ and deploy)
+     ═══════════════════════════════════════════════════════════ */
+  async function openPreview() {
+    if (downloadOnly) { deploy(""); return; }
     setBusy(true);
     try {
       const delta = await fetchSmart("/api/delta", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          defaultYaml: initVals,
-          userYaml: ymlRef.current,
-        }),
+        method  : "POST",
+        headers : { "Content-Type": "application/json" },
+        body    : JSON.stringify({ defaultYaml: initVals, userYaml: ymlRef.current }),
       });
       setPre({ delta });
     } catch (e) {
-      console.error("Δ-preview failed:", e);
+      console.error("Δ‑preview error:", e);
       onNotify("error", "Unable to compute YAML delta.", e.message);
     } finally {
       setBusy(false);
     }
   }
 
-  async function deploy(deltaOverride) {
+  async function deploy(deltaOverride = null) {
     const deltaStr =
       (deltaOverride ?? (preview?.delta || "").trim()) || "# (no overrides)";
 
-    /* derive identifiers */
-    let release,
-      namespace,
-      extra = {};
+    /* identifiers */
+    let release, namespace, extra = {};
     if (style === "name") {
-      release = name.trim() || chart.name;
+      release   = name.trim() || chart.name;
       namespace = release;
       extra = { name: release };
     } else {
-      release = appCode.trim();
-      namespace = [team.trim(), env.trim(), appCode.trim()]
-        .filter(Boolean)
-        .join("-");
-      extra = {
-        applicationCode: appCode.trim(),
-        team: team.trim(),
-        env: env.trim(),
-      };
+      release   = appCode.trim();
+      namespace = [team.trim(), env.trim(), appCode.trim()].filter(Boolean).join("-");
+      extra = { applicationCode: appCode.trim(), team: team.trim(), env: env.trim() };
     }
 
     const base = {
-      chart: chart.name,
-      version: ver,
-      repo: chart.repoURL,
+      chart : chart.name,
+      version : ver,
+      repo : chart.repoURL,
       owner: chart.repoName,
       release,
       namespace,
@@ -227,89 +210,60 @@ export default function ValuesEditor({
       : {
           ...base,
           ...extra,
-          userValuesYaml:
-            deltaStr === "# (no overrides)"
-              ? ""
-              : btoa(unescape(encodeURIComponent(deltaStr))),
+          userValuesYaml: deltaStr === "# (no overrides)" ? "" :
+            btoa(unescape(encodeURIComponent(deltaStr))),
         };
 
     const endpoint = downloadOnly ? "/api/download" : "/api/apps";
 
     setBusy(true);
-    let ok = true;
     try {
       const resp = await fetch(endpoint, {
-        method: "POST",
+        method : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body   : JSON.stringify(payload),
       });
-      if (!resp.ok) {
-        ok = false;
-        throw new Error(`HTTP ${resp.status}`);
-      }
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      onNotify("success",
+        downloadOnly ? "Download request sent!" : "Install request sent!",
+        release);
+      onBack();
     } catch (e) {
       console.error("deploy error:", e);
-      onNotify(
-        "error",
+      onNotify("error",
         downloadOnly ? "Download request failed." : "Install request failed.",
-        e.message
-      );
-      setBusy(false);
-      return;
-    }
-    setBusy(false);
-
-    if (ok) {
-      onNotify(
-        "success",
-        downloadOnly ? "Download request sent!" : "Install request sent!",
-        release
-      );
-    }
-    onBack();
+        e.message);
+    } finally { setBusy(false); }
   }
 
-  /* ────────────────────────────────────────────────────────────
-     Full‑screen helpers
-     ─────────────────────────────────────────────────────────── */
+  /* ════════════════════════════════════════════════════════════
+     5.  Full‑screen helpers (Monaco & Tree)
+     ═══════════════════════════════════════════════════════════ */
   function FullscreenEditor() {
     const ref = useRef(null);
     useEffect(() => {
-      if (!ref.current) return;
       const e = monaco.editor.create(ref.current, {
-        value: ymlRef.current,
+        value : ymlRef.current,
         language: "yaml",
         automaticLayout: true,
         minimap: { enabled: false },
       });
-      e.onDidChangeModelContent(() => {
-        ymlRef.current = e.getValue();
-      });
+      e.onDidChangeModelContent(() => { ymlRef.current = e.getValue(); });
 
-      const esc = (ev) => {
-        if (ev.key === "Escape") setFull(false);
-      };
+      const esc = ev => { if (ev.key === "Escape") setFull(false); };
       window.addEventListener("keydown", esc);
-
       return () => {
         ymlRef.current = e.getValue();
-        edRef.current?.setValue(ymlRef.current);
-        edRef.current?.layout();
-        e.dispose();
         window.removeEventListener("keydown", esc);
+        e.dispose();
       };
     }, []);
 
     return (
       <div className="modal-overlay" onClick={() => setFull(false)}>
-        <div
-          className="modal-dialog"
-          style={{ width: "90vw", height: "90vh", padding: 0 }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button className="modal-close" onClick={() => setFull(false)}>
-            ×
-          </button>
+        <div className="modal-dialog" style={{ width: "90vw", height: "90vh", padding: 0 }}
+             onClick={e => e.stopPropagation()}>
+          <button className="modal-close" onClick={() => setFull(false)}>×</button>
           <div ref={ref} style={{ width: "100%", height: "100%" }} />
         </div>
       </div>
@@ -317,85 +271,49 @@ export default function ValuesEditor({
   }
 
   function FullTreeModal() {
-    const esc = (ev) => {
-      if (ev.key === "Escape") setTFull(false);
-    };
-    useEffect(() => {
-      window.addEventListener("keydown", esc);
-      return () => window.removeEventListener("keydown", esc);
-    }, []);
+    const esc = ev => { if (ev.key === "Escape") setTFS(false); };
+    useEffect(() => { window.addEventListener("keydown", esc);
+      return () => window.removeEventListener("keydown", esc); }, []);
     return (
-      <div className="modal-overlay" onClick={() => setTFull(false)}>
-        <div
-          className="modal-dialog"
-          style={{ width: "90vw", height: "90vh", padding: 0 }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button className="modal-close" onClick={() => setTFull(false)}>
-            ×
-          </button>
+      <div className="modal-overlay" onClick={() => setTFS(false)}>
+        <div className="modal-dialog" style={{ width: "90vw", height: "90vh", padding: 0 }}
+             onClick={e => e.stopPropagation()}>
+          <button className="modal-close" onClick={() => setTFS(false)}>×</button>
           <YamlTreeEditor
             yamlText={treeYaml}
-            onChange={(txt) => {
-              setTreeYaml(txt);
-              ymlRef.current = txt;
-            }}
+            onChange={txt => { setTreeYaml(txt); ymlRef.current = txt; }}
           />
         </div>
       </div>
     );
   }
 
-  /* ────────────────────────────────────────────────────────────
-     Header helpers (unchanged)
-     ─────────────────────────────────────────────────────────── */
+  /* ════════════════════════════════════════════════════════════
+     6.  Render helpers
+     ═══════════════════════════════════════════════════════════ */
+  const namesOk =
+    style === "name"
+      ? Boolean(name.trim())
+      : team.trim() && env.trim() && appCode.trim();
+
   function ChartHeader() {
     return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          gap: "1rem",
-          marginBottom: "1.1rem",
-        }}
-      >
+      <div style={{ display: "flex", alignItems: "flex-start", gap: "1rem", marginBottom: "1.1rem" }}>
         {chart.logo && (
-          <img
-            src={chart.logo}
-            alt=""
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 6,
-              objectFit: "contain",
-              background: "#fff",
-              flexShrink: 0,
-            }}
-          />
+          <img src={chart.logo} alt="" style={{
+            width: 48, height: 48, borderRadius: 6,
+            objectFit: "contain", background: "#fff", flexShrink: 0 }} />
         )}
         <div style={{ minWidth: 0 }}>
           <h2 style={{ margin: 0 }}>{chart.displayName || chart.name}</h2>
           {chart.repoName && (
-            <p
-              style={{
-                margin: ".1rem 0 0",
-                fontSize: ".83rem",
-                color: "var(--text-light)",
-              }}
-            >
-              {chart.repoName}
-              {chart.latest ? ` · latest ${chart.latest}` : ""}
+            <p style={{ margin: ".1rem 0 0", fontSize: ".83rem", color: "var(--text-light)" }}>
+              {chart.repoName}{chart.latest ? ` · latest ${chart.latest}` : ""}
             </p>
           )}
           {chart.description && (
-            <p
-              style={{
-                margin: ".45rem 0 0",
-                fontSize: ".9rem",
-                color: "var(--text-light)",
-                maxWidth: "60ch",
-              }}
-            >
+            <p style={{ margin: ".45rem 0 0", fontSize: ".9rem",
+                        color: "var(--text-light)", maxWidth: "60ch" }}>
               {chart.description}
             </p>
           )}
@@ -404,250 +322,151 @@ export default function ValuesEditor({
     );
   }
 
-  /* ───────────────── ready checks ───────────────────────────── */
-  const namesOk =
-    style === "name"
-      ? Boolean(name.trim())
-      : team.trim() && env.trim() && appCode.trim();
-
-  /* ────────────────────────────────────────────────────────────
-     RENDER
-     ─────────────────────────────────────────────────────────── */
+  /* ════════════════════════════════════════════════════════════
+     7.  JSX
+     ═══════════════════════════════════════════════════════════ */
   return (
     <>
       {preview && <PreviewModal />}
-      {full && <FullscreenEditor />}
-      {treeFull && <FullTreeModal />}
+      {full    && <FullscreenEditor />}
+      {treeFS  && <FullTreeModal />}
 
-      <button className="btn-secondary btn-back" onClick={onBack}>
-        ← Back
-      </button>
+      <button className="btn-secondary btn-back" onClick={onBack}>← Back</button>
       <ChartHeader />
 
       {/* version select */}
       <label>Version</label>
       {versions.length ? (
-        <select value={ver} onChange={(e) => setVer(e.target.value)}>
-          {versions.map((v) => (
+        <select value={ver} onChange={e => setVer(e.target.value)}>
+          {versions.map(v => (
             <option key={v.version} value={v.version}>
-              {v.version}
-              {v.date ? `  –  ${fmtDate(v.date)}` : ""}
+              {v.version}{v.date ? `  –  ${fmtDate(v.date)}` : ""}
             </option>
           ))}
         </select>
-      ) : (
-        <em>no versions found</em>
-      )}
+      ) : <em>no versions found</em>}
 
       {/* identifiers */}
       {style === "name" ? (
         <>
           <label style={{ marginTop: "1rem" }}>Application name</label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            style={{ width: "100%", padding: ".55rem .8rem" }}
-            placeholder="e.g. grafana"
-          />
+          <input value={name} onChange={e => setName(e.target.value)}
+                 style={{ width: "100%", padding: ".55rem .8rem" }}
+                 placeholder="e.g. grafana" />
         </>
       ) : (
         <>
           <label style={{ marginTop: "1rem" }}>Team</label>
-          <input
-            value={team}
-            onChange={(e) => setTeam(e.target.value)}
-            style={{ width: "100%", padding: ".55rem .8rem" }}
-            placeholder="e.g. alcasys"
-          />
+          <input value={team} onChange={e => setTeam(e.target.value)}
+                 style={{ width: "100%", padding: ".55rem .8rem" }}
+                 placeholder="e.g. alcasys" />
           <label style={{ marginTop: "1rem" }}>Environment</label>
-          <input
-            value={env}
-            onChange={(e) => setEnv(e.target.value)}
-            style={{ width: "100%", padding: ".55rem .8rem" }}
-            placeholder="e.g. ppt"
-          />
+          <input value={env} onChange={e => setEnv(e.target.value)}
+                 style={{ width: "100%", padding: ".55rem .8rem" }}
+                 placeholder="e.g. ppt" />
           <label style={{ marginTop: "1rem" }}>Application code</label>
-          <input
-            value={appCode}
-            onChange={(e) => setCode(e.target.value)}
-            style={{ width: "100%", padding: ".55rem .8rem" }}
-            placeholder="e.g. wfm"
-          />
+          <input value={appCode} onChange={e => setCode(e.target.value)}
+                 style={{ width: "100%", padding: ".55rem .8rem" }}
+                 placeholder="e.g. wfm" />
         </>
       )}
 
       {/* download‑only toggle */}
       <label style={{ marginTop: "1rem", display: "flex", gap: ".5rem" }}>
-        <input
-          type="checkbox"
-          checked={downloadOnly}
-          onChange={(e) => setDL(e.target.checked)}
-          style={{ transform: "translateY(2px)" }}
-        />
+        <input type="checkbox" checked={downloadOnly}
+               onChange={e => setDL(e.target.checked)}
+               style={{ transform: "translateY(2px)" }} />
         <span>I only want to download this Helm chart (do not install)</span>
       </label>
 
       {/* friendly mode toggle */}
       {!downloadOnly && (
         <label style={{ marginTop: ".6rem", display: "flex", gap: ".5rem" }}>
-          <input
-            type="checkbox"
-            checked={friendly}
-            onChange={(e) => {
-              const checked = e.target.checked;
-              if (checked) {
-                setTreeYaml(ymlRef.current);
-              } else {
-                ymlRef.current = treeYaml;
-                if (edRef.current) {
-                  edRef.current.setValue(ymlRef.current);
-                  edRef.current.layout();
-                }
-              }
-              setFr(checked);
-            }}
-            style={{ transform: "translateY(2px)" }}
-          />
+          <input type="checkbox" checked={friendly}
+                 onChange={e => {
+                   const on = e.target.checked;
+                   if (on) {
+                     setTreeYaml(ymlRef.current);          // feed the tree
+                   } else {
+                     ymlRef.current = treeYaml;            // feed Monaco later
+                   }
+                   setFr(on);
+                 }}
+                 style={{ transform: "translateY(2px)" }} />
           <span>Switch to Friendly User Experience</span>
         </label>
       )}
 
-      {/* EDITOR AREA ------------------------------------------------ */}
-      {!downloadOnly &&
-        (busy ? (
-          <div
-            style={{
-              height: "52vh",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
+      {/* editor area */}
+      {!downloadOnly && (
+        busy ? (
+          <div style={{ height: "52vh", display: "flex",
+                        alignItems: "center", justifyContent: "center" }}>
             <Spinner size={36} />
           </div>
         ) : friendly ? (
           <div style={{ position: "relative" }}>
-            <button
-              className="btn-secondary"
-              style={{
-                position: "absolute",
-                top: 6,
-                right: 6,
-                padding: ".25rem .6rem",
-                fontSize: ".8rem",
-                zIndex: 5,
-              }}
-              onClick={() => setTFull(true)}
-            >
-              ⤢ Full screen
-            </button>
-            <YamlTreeEditor
-              yamlText={treeYaml}
-              onChange={(txt) => {
-                setTreeYaml(txt);
-                ymlRef.current = txt;
-              }}
-            />
+            <button className="btn-secondary"
+                    style={{ position: "absolute", top: 6, right: 6,
+                             padding: ".25rem .6rem", fontSize: ".8rem", zIndex: 5 }}
+                    onClick={() => setTFS(true)}>⤢ Full screen</button>
+            <YamlTreeEditor yamlText={treeYaml}
+                            onChange={txt => { setTreeYaml(txt); ymlRef.current = txt; }} />
           </div>
         ) : (
           <div style={{ position: "relative" }}>
-            <button
-              className="btn-secondary"
-              style={{
-                position: "absolute",
-                top: 6,
-                right: 6,
-                padding: ".25rem .6rem",
-                fontSize: ".8rem",
-                zIndex: 5,
-              }}
-              onClick={() => setFull(true)}
-            >
-              ⤢ Full screen
-            </button>
+            <button className="btn-secondary"
+                    style={{ position: "absolute", top: 6, right: 6,
+                             padding: ".25rem .6rem", fontSize: ".8rem", zIndex: 5 }}
+                    onClick={() => setFull(true)}>⤢ Full screen</button>
             <div ref={edDivRef} className="editor-frame" />
           </div>
-        ))}
+        )
+      )}
 
       {/* primary action */}
-      <button
-        className="btn"
-        onClick={openPreview}
-        disabled={busy || !ver || !namesOk}
-      >
-        {busy
-          ? "Working…"
-          : downloadOnly
-          ? "Download chart"
-          : "Install"}
+      <button className="btn"
+              onClick={openPreview}
+              disabled={busy || !ver || !namesOk}>
+        {busy ? "Working…" : downloadOnly ? "Download chart" : "Install"}
       </button>
     </>
   );
 
-  /* ────────────────────────────────────────────────────────────
-     Preview modal (unchanged apart from alert→onNotify)
-     ─────────────────────────────────────────────────────────── */
+  /* ════════════════════════════════════════════════════════════
+     8.  Preview modal – unchanged
+     ═══════════════════════════════════════════════════════════ */
   function PreviewModal() {
     const mRef = useRef(null);
     useEffect(() => {
-      if (!mRef.current) return;
-      const e = monaco.editor.create(mRef.current, {
-        value: preview?.delta || "# (no overrides)",
-        language: "yaml",
-        readOnly: true,
-        automaticLayout: true,
-        minimap: { enabled: false },
+      const ed = monaco.editor.create(mRef.current, {
+        value : preview?.delta || "# (no overrides)",
+        language        : "yaml",
+        readOnly        : true,
+        automaticLayout : true,
+        minimap         : { enabled: false },
       });
-      return () => e.dispose();
+      return () => ed.dispose();
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
     return (
       <div className="modal-overlay" onClick={() => setPre(null)}>
-        <div
-          className="modal-dialog"
-          style={{ width: "64vw", maxWidth: 900 }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button className="modal-close" onClick={() => setPre(null)}>
-            ×
-          </button>
+        <div className="modal-dialog" style={{ width: "64vw", maxWidth: 900 }}
+             onClick={e => e.stopPropagation()}>
+          <button className="modal-close" onClick={() => setPre(null)}>×</button>
           <h2 style={{ margin: 0 }}>Override values preview</h2>
-          <p
-            style={{
-              margin: ".65rem 0 1rem",
-              fontSize: ".85rem",
-              color: "var(--text-light)",
-            }}
-          >
+          <p style={{ margin: ".65rem 0 1rem", fontSize: ".85rem",
+                      color: "var(--text-light)" }}>
             Only the keys that differ from chart defaults will be saved.
           </p>
-          <div
-            ref={mRef}
-            style={{
-              height: "50vh",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-            }}
-          />
-          <div
-            style={{
-              display: "flex",
-              gap: "1rem",
-              justifyContent: "flex-end",
-              marginTop: "1.1rem",
-            }}
-          >
-            <button
-              className="btn-secondary"
-              onClick={() => setPre(null)}
-              disabled={busy}
-            >
-              Back
-            </button>
-            <button
-              className="btn"
-              onClick={() => deploy()}
-              disabled={busy}
-            >
+          <div ref={mRef} style={{
+            height: "50vh", border: "1px solid var(--border)", borderRadius: 6 }} />
+          <div style={{ display: "flex", gap: "1rem",
+                        justifyContent: "flex-end", marginTop: "1.1rem" }}>
+            <button className="btn-secondary" onClick={() => setPre(null)}
+                    disabled={busy}>Back</button>
+            <button className="btn" onClick={() => deploy()}
+                    disabled={busy}>
               {busy ? "Saving…" : "Install"}
             </button>
           </div>
