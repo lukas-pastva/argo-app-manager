@@ -124,12 +124,12 @@ export default function ValuesEditor({
     };
   }, [chart.packageId, ver, friendly]);
 
-  /* ─── create Monaco (re‑runs when DL / friendly switch) ───── */
+  /* ─── (re)create Monaco when visible ------------------------ */
   useEffect(() => {
     if (
       busy ||
-      downloadOnly ||              // hidden ⇒ don’t create
-      friendly ||                  // hidden ⇒ don’t create
+      downloadOnly ||
+      friendly ||
       !edDivRef.current ||
       edRef.current
     )
@@ -148,19 +148,19 @@ export default function ValuesEditor({
     return () => edRef.current?.dispose();
   }, [busy, initVals, friendly, downloadOnly]);
 
-  /* ─── keep Monaco fresh when coming *back* ------------------- */
+  /* ─── dispose Monaco when hidden (DL or Friendly) ----------- */
   useEffect(() => {
-    if (!friendly && !downloadOnly && edRef.current) edRef.current.layout();
-  }, [friendly, downloadOnly]);
-
-  /* ─── dispose Monaco while in download‑only mode ------------- */
-  useEffect(() => {
-    if (downloadOnly && edRef.current) {
+    if ((downloadOnly || friendly) && edRef.current) {
       ymlRef.current = edRef.current.getValue(); // preserve edits
       edRef.current.dispose();
       edRef.current = null;
     }
-  }, [downloadOnly]);
+  }, [downloadOnly, friendly]);
+
+  /* ─── force repaint when we bring Monaco back ---------------- */
+  useEffect(() => {
+    if (!friendly && !downloadOnly && edRef.current) edRef.current.layout();
+  }, [friendly, downloadOnly]);
 
   /* ────────────────────────────────────────────────────────────
      Helpers (preview Δ  /  deploy  /  Monaco‑full)
