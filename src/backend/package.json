@@ -1,5 +1,5 @@
 {
-  "name": "argo-helm-toggler-backend",
+  "name": "argo-app-manager-backend",
   "version": "1.0.0",
   "type": "module",
   "main": "src/index.js",

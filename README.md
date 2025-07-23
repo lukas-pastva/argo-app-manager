@@ -1,4 +1,4 @@
-# Argo Helm Toggler 🚀
+# Argo App Manager 🚀
 
 A **tiny Git‑based web UI** that lets you add / remove Helm charts in your GitOps
 *app‑of‑apps* repo and trigger an Argo Workflow (or any webhook).  
@@ -23,10 +23,10 @@ One container = React + Express + Helm.
 ## 🚀 Quick start (stand‑alone Docker)
 
 ```bash
-docker build -t argo-helm-toggler .
+docker build -t argo-app-manager .
 
 docker run -p 8080:8080   -e GIT_REPO_SSH=git@github.com:my-org/argo-apps.git   -e GIT_SSH_KEY="$(cat ~/.ssh/id_ed25519)"   -e WF_WEBHOOK_URL=https://argo.example.com/api/helm-deploy   # optional overrides ⤵
-  -e APPS_GLOB="stage-*.yaml"    argo-helm-toggler
+  -e APPS_GLOB="stage-*.yaml"    argo-app-manager
 ```
 
 Open <http://localhost:8080>
@@ -114,4 +114,4 @@ Open <http://localhost:8080>
 
 ---
 
-© 2025 Argo Helm Toggler • MIT
+© 2025 Argo App Manager • MIT

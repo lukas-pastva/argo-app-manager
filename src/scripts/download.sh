@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #───────────────────────────────────────────────────────────────────────────────
 #  download.sh  –  v1.1
-#  *For “Download Helm chart only” requests from Helm-Toggler*
+#  *For “Download Helm chart only” requests from App-Manager*
 #───────────────────────────────────────────────────────────────────────────────
 set -Eeuo pipefail
 [[ ${DEBUG:-false} == "true" ]] && set -x

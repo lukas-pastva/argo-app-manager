@@ -1,5 +1,5 @@
 {
-  "name": "argo-helm-toggler-frontend",
+  "name": "argo-app-manager-frontend",
   "version": "1.0.0",
   "private": true,
   "type": "module",

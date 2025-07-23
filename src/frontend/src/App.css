@@ -53,7 +53,7 @@ h3{margin:0 0 .9rem;font-size:1.1rem;color:var(--primary);}
 [data-theme='dark'] .btn-secondary{background:#2f343a;color:var(--text-light);}
 .btn-secondary:hover{background:#d5d9dd;}
 [data-theme='dark'] .btn-secondary:hover{background:#3b4047;}
-.btn-back{margin-bottom:1.4rem;margin-right:1rem;}
+.btn-back{margin-bottom:1.4rem;margin-left:1rem;}
 
 /* ────────────────────────────────────────────────────────────────
    THEME TOGGLE

@@ -65,7 +65,7 @@ export default function App() {
       {files.length > 0 &&
         <Tabs files={files} active={activeFile} onSelect={setActive} />}
 
-      <h1>Argo Helm Toggler</h1>
+      <h1>Argo App Manager</h1>
 
       <button className="btn" style={{ marginBottom: "1.2rem" }} onClick={startInstall}>
         ＋ Install chart
