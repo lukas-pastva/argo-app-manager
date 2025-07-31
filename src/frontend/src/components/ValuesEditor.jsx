@@ -4,12 +4,8 @@
 
       • Plain YAML editing with Monaco
       • Friendly form editing (YamlTreeEditor)
-      • Download‑only mode (no values editor)
-      • Full‑screen editors
-
-    This revision fixes the “blank area” bug by **always destroying
-    Monaco when it’s hidden and rebuilding it with the latest YAML
-    when it becomes visible again**.
+      • Download-only mode (no identifiers required)  ← FIXED ✨
+      • Full-screen editors
 */
 
 import React, { useEffect, useRef, useState } from "react";
@@ -25,23 +21,17 @@ async function fetchSmart(url, opts = {}) {
   const ct = res.headers.get("content-type") || "";
   return ct.includes("json") ? res.json() : res.text();
 }
-
 function useFetch(url, deps, cb) {
   useEffect(() => {
     if (!url) return;
     const ctrl = new AbortController();
     (async () => {
-      try {
-        cb(await fetchSmart(url, { signal: ctrl.signal }));
-      } catch {
-        /* silent */
-      }
+      try { cb(await fetchSmart(url, { signal: ctrl.signal })); } catch {/* ignore */}
     })();
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 }
-
 const fmtDate = (iso) => {
   const d = new Date(iso);
   return isNaN(d) ? "" : d.toISOString().slice(0, 10);
@@ -54,7 +44,7 @@ export default function ValuesEditor({
   onBack,
   onNotify = () => {},
 }) {
-  /* ───────── fixed style (cluster‑wide convention) ─────────── */
+  /* ───────── fixed style (cluster-wide convention) ─────────── */
   const style = installStyle === "trio" ? "trio" : "name";
 
   /* ───────── chart versions & defaults ─────────────────────── */
@@ -71,12 +61,12 @@ export default function ValuesEditor({
 
   /* ───────── misc state ────────────────────────────────────── */
   const [preview,   setPre ]  = useState(null);   // { delta }
-  const [downloadOnly, setDL] = useState(false);
+  const [downloadOnly, setDL] = useState(false);  // ← new logic depends on this
   const [friendly, setFr]     = useState(false);
   const [full,   setFull]     = useState(false);  // Monaco FS
   const [treeFS, setTFS]      = useState(false);  // Tree FS
 
-  /* UI‑state mirrors */
+  /* UI-state mirrors */
   const [treeYaml, setTreeYaml] = useState("");
 
   /* ───────── refs ──────────────────────────────────────────── */
@@ -163,7 +153,9 @@ export default function ValuesEditor({
      4.  Helpers (preview Δ and deploy)
      ═══════════════════════════════════════════════════════════ */
   async function openPreview() {
-    if (downloadOnly) { deploy(""); return; }
+    /* For download-only there is nothing to diff – jump straight to deploy */
+    if (downloadOnly) { deploy(); return; }
+
     setBusy(true);
     try {
       const delta = await fetchSmart("/api/delta", {
@@ -173,46 +165,51 @@ export default function ValuesEditor({
       });
       setPre({ delta });
     } catch (e) {
-      console.error("Δ‑preview error:", e);
+      console.error("Δ-preview error:", e);
       onNotify("error", "Unable to compute YAML delta.", e.message);
     } finally {
       setBusy(false);
     }
   }
 
-  async function deploy(deltaOverride = null) {
-    const deltaStr =
-      (deltaOverride ?? (preview?.delta || "").trim()) || "# (no overrides)";
-
-    /* identifiers */
-    let release, namespace, extra = {};
-    if (style === "name") {
-      release   = name.trim() || chart.name;
-      namespace = release;
-      extra = { name: release };
+  async function deploy() {
+    /* ── build payload ───────────────────────────────────────── */
+    let payload;
+    if (downloadOnly) {
+      /* Download-only needs just four fields */
+      payload = {
+        chart  : chart.name,
+        version: ver,
+        repo   : chart.repoURL,
+        owner  : chart.repoName,
+      };
     } else {
-      release   = appCode.trim();
-      namespace = [team.trim(), env.trim(), appCode.trim()].filter(Boolean).join("-");
-      extra = { applicationCode: appCode.trim(), team: team.trim(), env: env.trim() };
+      /* Regular install needs identifiers + optional delta YAML */
+      let release, namespace, extra = {};
+      if (style === "name") {
+        release   = name.trim() || chart.name;
+        namespace = release;
+        extra     = { name: release };
+      } else {
+        release   = appCode.trim();
+        namespace = [team.trim(), env.trim(), appCode.trim()].filter(Boolean).join("-");
+        extra     = { applicationCode: appCode.trim(), team: team.trim(), env: env.trim() };
+      }
+
+      const deltaStr = (preview?.delta || "").trim() || "# (no overrides)";
+      payload = {
+        chart   : chart.name,
+        version : ver,
+        repo    : chart.repoURL,
+        owner   : chart.repoName,
+        release,
+        namespace,
+        ...extra,
+        userValuesYaml:
+          deltaStr === "# (no overrides)" ? "" :
+          btoa(unescape(encodeURIComponent(deltaStr))),
+      };
     }
-
-    const base = {
-      chart : chart.name,
-      version : ver,
-      repo : chart.repoURL,
-      owner: chart.repoName,
-      release,
-      namespace,
-    };
-
-    const payload = downloadOnly
-      ? { ...base, ...extra }
-      : {
-          ...base,
-          ...extra,
-          userValuesYaml: deltaStr === "# (no overrides)" ? "" :
-            btoa(unescape(encodeURIComponent(deltaStr))),
-        };
 
     const endpoint = downloadOnly ? "/api/download" : "/api/apps";
 
@@ -224,17 +221,22 @@ export default function ValuesEditor({
         body   : JSON.stringify(payload),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      onNotify("success",
+      onNotify(
+        "success",
         downloadOnly ? "Download request sent!" : "Install request sent!",
-        release);
+        chart.name,
+      );
       onBack();
     } catch (e) {
       console.error("deploy error:", e);
-      onNotify("error",
+      onNotify(
+        "error",
         downloadOnly ? "Download request failed." : "Install request failed.",
-        e.message);
+        e.message,
+      );
     } finally { setBusy(false); }
   }
+
 
   /* ════════════════════════════════════════════════════════════
      5.  Full‑screen helpers (Monaco & Tree)
@@ -291,18 +293,23 @@ export default function ValuesEditor({
   /* ════════════════════════════════════════════════════════════
      6.  Render helpers
      ═══════════════════════════════════════════════════════════ */
-  const namesOk =
-    style === "name"
-      ? Boolean(name.trim())
-      : team.trim() && env.trim() && appCode.trim();
+  const namesOk = downloadOnly
+    ? true                                       // ← identifiers not needed
+    : style === "name"
+        ? Boolean(name.trim())
+        : team.trim() && env.trim() && appCode.trim();
 
   function ChartHeader() {
     return (
       <div style={{ display: "flex", alignItems: "flex-start", gap: "1rem", marginBottom: "1.1rem" }}>
         {chart.logo && (
-          <img src={chart.logo} alt="" style={{
-            width: 48, height: 48, borderRadius: 6,
-            objectFit: "contain", background: "#fff", flexShrink: 0 }} />
+          <img
+            src={chart.logo}
+            alt=""
+            style={{
+              width: 48, height: 48, borderRadius: 6,
+              objectFit: "contain", background: "#fff", flexShrink: 0 }}
+          />
         )}
         <div style={{ minWidth: 0 }}>
           <h2 style={{ margin: 0 }}>{chart.displayName || chart.name}</h2>
@@ -346,53 +353,73 @@ export default function ValuesEditor({
         </select>
       ) : <em>no versions found</em>}
 
-      {/* identifiers */}
-      {style === "name" ? (
-        <>
-          <label style={{ marginTop: "1rem" }}>Application name</label>
-          <input value={name} onChange={e => setName(e.target.value)}
-                 style={{ width: "100%", padding: ".55rem .8rem" }}
-                 placeholder="e.g. grafana" />
-        </>
-      ) : (
-        <>
-          <label style={{ marginTop: "1rem" }}>Team</label>
-          <input value={team} onChange={e => setTeam(e.target.value)}
-                 style={{ width: "100%", padding: ".55rem .8rem" }}
-                 placeholder="e.g. alcasys" />
-          <label style={{ marginTop: "1rem" }}>Environment</label>
-          <input value={env} onChange={e => setEnv(e.target.value)}
-                 style={{ width: "100%", padding: ".55rem .8rem" }}
-                 placeholder="e.g. ppt" />
-          <label style={{ marginTop: "1rem" }}>Application code</label>
-          <input value={appCode} onChange={e => setCode(e.target.value)}
-                 style={{ width: "100%", padding: ".55rem .8rem" }}
-                 placeholder="e.g. wfm" />
-        </>
+      {/* identifiers – hidden when “download only” is on */}
+      {!downloadOnly && (
+        style === "name" ? (
+          <>
+            <label style={{ marginTop: "1rem" }}>Application name</label>
+            <input
+              value={name}
+              onChange={e => setName(e.target.value)}
+              style={{ width: "100%", padding: ".55rem .8rem" }}
+              placeholder="e.g. grafana"
+            />
+          </>
+        ) : (
+          <>
+            <label style={{ marginTop: "1rem" }}>Team</label>
+            <input
+              value={team}
+              onChange={e => setTeam(e.target.value)}
+              style={{ width: "100%", padding: ".55rem .8rem" }}
+              placeholder="e.g. alcasys"
+            />
+            <label style={{ marginTop: "1rem" }}>Environment</label>
+            <input
+              value={env}
+              onChange={e => setEnv(e.target.value)}
+              style={{ width: "100%", padding: ".55rem .8rem" }}
+              placeholder="e.g. ppt"
+            />
+            <label style={{ marginTop: "1rem" }}>Application code</label>
+            <input
+              value={appCode}
+              onChange={e => setCode(e.target.value)}
+              style={{ width: "100%", padding: ".55rem .8rem" }}
+              placeholder="e.g. wfm"
+            />
+          </>
+        )
       )}
 
-      {/* download‑only toggle */}
+      {/* download-only toggle */}
       <label style={{ marginTop: "1rem", display: "flex", gap: ".5rem" }}>
-        <input type="checkbox" checked={downloadOnly}
-               onChange={e => setDL(e.target.checked)}
-               style={{ transform: "translateY(2px)" }} />
+        <input
+          type="checkbox"
+          checked={downloadOnly}
+          onChange={e => setDL(e.target.checked)}
+          style={{ transform: "translateY(2px)" }}
+        />
         <span>I only want to download this Helm chart (do not install)</span>
       </label>
 
       {/* friendly mode toggle */}
       {!downloadOnly && (
         <label style={{ marginTop: ".6rem", display: "flex", gap: ".5rem" }}>
-          <input type="checkbox" checked={friendly}
-                 onChange={e => {
-                   const on = e.target.checked;
-                   if (on) {
-                     setTreeYaml(ymlRef.current);          // feed the tree
-                   } else {
-                     ymlRef.current = treeYaml;            // feed Monaco later
-                   }
-                   setFr(on);
-                 }}
-                 style={{ transform: "translateY(2px)" }} />
+          <input
+            type="checkbox"
+            checked={friendly}
+            onChange={e => {
+              const on = e.target.checked;
+              if (on) {
+                setTreeYaml(ymlRef.current);          // feed the tree
+              } else {
+                ymlRef.current = treeYaml;            // feed Monaco later
+              }
+              setFr(on);
+            }}
+            style={{ transform: "translateY(2px)" }}
+          />
           <span>Switch to Friendly User Experience</span>
         </label>
       )}
@@ -400,34 +427,62 @@ export default function ValuesEditor({
       {/* editor area */}
       {!downloadOnly && (
         busy ? (
-          <div style={{ height: "52vh", display: "flex",
-                        alignItems: "center", justifyContent: "center" }}>
+          <div style={{
+            height: "52vh",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
+          }}>
             <Spinner size={36} />
           </div>
         ) : friendly ? (
           <div style={{ position: "relative" }}>
-            <button className="btn-secondary"
-                    style={{ position: "absolute", top: 6, right: 6,
-                             padding: ".25rem .6rem", fontSize: ".8rem", zIndex: 5 }}
-                    onClick={() => setTFS(true)}>⤢ Full screen</button>
-            <YamlTreeEditor yamlText={treeYaml}
-                            onChange={txt => { setTreeYaml(txt); ymlRef.current = txt; }} />
+            <button
+              className="btn-secondary"
+              style={{
+                position: "absolute",
+                top: 6,
+                right: 6,
+                padding: ".25rem .6rem",
+                fontSize: ".8rem",
+                zIndex: 5,
+              }}
+              onClick={() => setTFS(true)}
+            >
+              ⤢ Full screen
+            </button>
+            <YamlTreeEditor
+              yamlText={treeYaml}
+              onChange={txt => { setTreeYaml(txt); ymlRef.current = txt; }}
+            />
           </div>
         ) : (
           <div style={{ position: "relative" }}>
-            <button className="btn-secondary"
-                    style={{ position: "absolute", top: 6, right: 6,
-                             padding: ".25rem .6rem", fontSize: ".8rem", zIndex: 5 }}
-                    onClick={() => setFull(true)}>⤢ Full screen</button>
+            <button
+              className="btn-secondary"
+              style={{
+                position: "absolute",
+                top: 6,
+                right: 6,
+                padding: ".25rem .6rem",
+                fontSize: ".8rem",
+                zIndex: 5,
+              }}
+              onClick={() => setFull(true)}
+            >
+              ⤢ Full screen
+            </button>
             <div ref={edDivRef} className="editor-frame" />
           </div>
         )
       )}
 
       {/* primary action */}
-      <button className="btn"
-              onClick={openPreview}
-              disabled={busy || !ver || !namesOk}>
+      <button
+        className="btn"
+        onClick={openPreview}
+        disabled={busy || !ver || !namesOk}
+      >
         {busy ? "Working…" : downloadOnly ? "Download chart" : "Install"}
       </button>
     </>
