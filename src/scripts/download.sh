@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 #───────────────────────────────────────────────────────────────────────────────
-#  download.sh  –  v1.1
+#  download.sh  –  v1.2
 #  *For “Download Helm chart only” requests from App-Manager*
+#  Changes:
+#    - Use `helm pull --untar` to avoid filename assumptions
+#    - Auto-retry with `v${version}` (Jetstack charts are v-prefixed)
 #───────────────────────────────────────────────────────────────────────────────
 set -Eeuo pipefail
 [[ ${DEBUG:-false} == "true" ]] && set -x
@@ -84,11 +87,39 @@ fi
 
 log "⬇️   helm pull → $chart_path"
 tempc="$(mktemp -d)"
-helm pull "${var_chart}" --repo "${var_repo}" --version "${var_version}" -d "$tempc" > /dev/null
-tar -xzf "$tempc/${var_chart}-${var_version}.tgz" -C "$tempc"
+
+pull_and_untar() {
+  local ver="$1"
+  # --untar extracts into --untardir/<chartName>
+  helm pull "${var_chart}" \
+    --repo "${var_repo}" \
+    --version "${ver}" \
+    --untar \
+    --untardir "${tempc}" > /dev/null
+}
+
+# try exact version first; if it fails (or repo expects v-prefix), retry
+set +e
+pull_and_untar "${var_version}"
+rc=$?
+if (( rc != 0 )) && [[ ${var_version} != v* ]]; then
+  log "ℹ️  Retrying with version v${var_version} (some repos, incl. Jetstack, publish v-prefixed chart versions)…"
+  pull_and_untar "v${var_version}"
+  rc=$?
+fi
+set -e
+
+if (( rc != 0 )); then
+  log "🚫  helm pull failed for versions: '${var_version}' and 'v${var_version}'."
+  exit 1
+fi
+
+# sanity check
+[[ -d "${tempc}/${var_chart}" ]] || { log "🚫  Expected dir '${tempc}/${var_chart}' not found after pull."; exit 1; }
 
 mkdir -p "$chart_path"
-mv "$tempc/${var_chart}/"* "$chart_path/"
+# copy content (not the top-level dir) to the cache path
+cp -a "${tempc}/${var_chart}/." "$chart_path/"
 rm -rf "$tempc"
 log "🗃  Chart extracted"
 
