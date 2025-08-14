@@ -30,6 +30,13 @@ export default function Notice({
     return () => document.body.classList.remove("modal-open");
   }, []);
 
+  /* close on Escape for smoother UX ---------------------------- */
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   const icon =
     type === "success" ? "✅" :
     type === "error"   ? "⚠️" :

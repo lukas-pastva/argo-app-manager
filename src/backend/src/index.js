@@ -9,6 +9,7 @@ import axios    from "axios";
 import yaml     from "js-yaml";
 import fs       from "fs/promises";
 import path     from "node:path";
+import semver   from "semver";
 
 import cfg                          from "./config.js";
 import { ensureRepo, listAppFiles } from "./git.js";
@@ -164,7 +165,7 @@ app.get("/api/app/values", async (req, res) => {
 /* ════════════════════════════════════════════════════════════════
    4.  Artifact Hub helpers (versions & default values)
    ═══════════════════════════════════════════════════════════════ */
-/* 4-a  list chart versions **with release dates**  + debug log   */
+/* 4-a  list chart versions **with release dates**, newest first (SemVer) */
 app.get("/api/chart/versions", async (req, res) => {
   const { owner: repo, chart, limit = 40 } = req.query;
   if (!repo || !chart)
@@ -178,17 +179,20 @@ app.get("/api/chart/versions", async (req, res) => {
       { timeout: 10_000 },
     );
 
-    const versions = (data.available_versions || [])
+    const raw = (data.available_versions || [])
       .slice(0, +limit)
       .map(v => ({
         version: v.version,
         date   : v.created_at || null,
       }));
 
-    /* ─── DEBUG: print count + first item ───────────────────── */
+    /* SemVer-desc sort: latest on top (coerce handles v-prefix etc.) */
+    const toSV = (s) => semver.coerce(s) ?? new semver.SemVer("0.0.0");
+    const versions = raw.sort((a, b) => semver.rcompare(toSV(a.version), toSV(b.version)));
+
     console.log(
       `[vers] got ${versions.length} versions` +
-      (versions.length ? ` – first: ${JSON.stringify(versions[0])}` : ""),
+      (versions.length ? ` – top: ${versions[0].version}` : ""),
     );
 
     res.json(versions);
