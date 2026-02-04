@@ -91,23 +91,34 @@ export default function App() {
       {files.length > 0 &&
         <Tabs files={files} active={activeFile} onSelect={setActive} />}
 
-      {chart ? (
-        /* install / download flow ------------------------------------------ */
-        <ValuesEditor
-          chart={chart}
-          installStyle={installStyle}
-          forceDownloadOnly={uiCfg.downloadOnly}
-          onBack={() => setChart(null)}
-          onNotify={notify}
-        />
-      ) : (
-        /* home – search + installed charts --------------------------------- */
-        <>
+      {/* ── Search & download section ──────────────────────────── */}
+      <section className="panel panel-search">
+        <h2 className="panel-title">
+          {uiCfg.downloadOnly ? "Download Helm Chart" : "Install Helm Chart"}
+        </h2>
+
+        {!chart ? (
           <ChartSearch onSelect={setChart} />
-          {uiCfg.hasHelmCharts && <InstalledCharts />}
-          {!uiCfg.downloadOnly && <AppsList file={activeFile} onNotify={notify} />}
-        </>
+        ) : (
+          <ValuesEditor
+            chart={chart}
+            installStyle={installStyle}
+            forceDownloadOnly={uiCfg.downloadOnly}
+            onBack={() => setChart(null)}
+            onNotify={notify}
+          />
+        )}
+      </section>
+
+      {/* ── Installed charts section ───────────────────────────── */}
+      {uiCfg.hasHelmCharts && (
+        <section className="panel panel-installed">
+          <InstalledCharts />
+        </section>
       )}
+
+      {/* ── Apps list (non-download mode) ──────────────────────── */}
+      {!uiCfg.downloadOnly && <AppsList file={activeFile} onNotify={notify} />}
 
       {/* global notice modal */}
       {notice && (

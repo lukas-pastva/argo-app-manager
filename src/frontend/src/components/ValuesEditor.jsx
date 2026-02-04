@@ -317,10 +317,14 @@ export default function ValuesEditor({
       {full    && <FullscreenEditor />}
       {treeFS  && <FullTreeModal />}
 
-      <button className="btn-secondary btn-back" onClick={onBack}>← Back</button>
-
-      {/* chart header */}
-      <ChartHeader />
+      {/* chart header + change link */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: ".2rem" }}>
+        <ChartHeader />
+        <button className="btn-secondary" onClick={onBack}
+                style={{ flexShrink: 0, fontSize: ".8rem", padding: ".35rem .9rem" }}>
+          Change chart
+        </button>
+      </div>
 
       {/* version select */}
       <label>Version</label>

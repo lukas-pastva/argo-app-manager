@@ -61,12 +61,15 @@ export default function ChartSearch({ onSelect }) {
       <div className="search-box">
         <input
           className="search-input"
-          placeholder="Start typing a chart name…"
+          placeholder="Search ArtifactHub for a chart..."
           value={q}
           onChange={e => search(e.target.value)}
         />
         {load && <span style={{ alignSelf: "center" }}>⏳</span>}
       </div>
+      {!res.length && !load && (
+        <p className="search-hint">Type at least 3 characters to search ArtifactHub</p>
+      )}
 
       {res.length > 0 && (
         <div className="results-list">
