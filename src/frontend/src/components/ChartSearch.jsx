@@ -33,7 +33,7 @@ export default function ChartSearch({ onSelect }) {
 
   async function search(text) {
     setQ(text);
-    if (text.length < 3) {        // AH doesn’t search for <3 chars
+    if (text.length < 3) {
       setRes([]);
       return;
     }
@@ -43,9 +43,17 @@ export default function ChartSearch({ onSelect }) {
       `${AH_BASE}/packages/search?kind=0&limit=20&ts_query_web=` +
       encodeURIComponent(text);
 
-    const { packages: hits = [] } = await fetch(url).then(r => r.json());
-    setRes(hits.map(normalize));
-    setLoad(false);
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(r.statusText);
+      const { packages: hits = [] } = await r.json();
+      setRes(hits.map(normalize));
+    } catch (e) {
+      console.error("[ChartSearch] fetch error:", e.message);
+      setRes([]);
+    } finally {
+      setLoad(false);
+    }
   }
 
   return (
