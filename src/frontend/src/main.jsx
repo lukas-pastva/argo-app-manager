@@ -2,6 +2,15 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App.jsx";
 
+/* Apply saved theme before first paint to prevent flash */
+{
+  const mode  = localStorage.getItem("theme-mode") || "auto";
+  const theme = mode === "auto"
+    ? (matchMedia("(prefers-color-scheme:dark)").matches ? "dark" : "light")
+    : mode;
+  document.documentElement.dataset.theme = theme;
+}
+
 createRoot(document.getElementById("root")).render(<App />);
 
 /* ── tell Monaco how to load its workers in Vite ──────────────────
