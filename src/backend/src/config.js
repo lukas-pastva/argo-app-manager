@@ -24,6 +24,11 @@ export default {
 
   webhookTok: process.env.WF_TOKEN || "",
 
+  /* UI customisation */
+  appTitle      : process.env.APP_TITLE       || "",
+  appDescription: process.env.APP_DESCRIPTION || "",
+  downloadOnly  : (process.env.DOWNLOAD_ONLY || "").toLowerCase() === "true",
+
   /* misc */
   chartCacheDir: "/tmp/chart-cache",
   port: Number(process.env.PORT) || 8080

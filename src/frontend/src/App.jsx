@@ -19,12 +19,31 @@ export default function App() {
   const [adding,       setAdd]     = useState(false);
   const [installStyle, setStyle]   = useState("name");   // auto-detected
 
+  /* UI config from backend env variables ------------------------ */
+  const [uiCfg, setUiCfg] = useState({
+    appTitle: "",
+    appDescription: "",
+    downloadOnly: false,
+  });
+
   /* centralised notice state ----------------------------------- */
   const [notice, setNotice] = useState(null);            // {type,message,sub}
 
   const notify = (type, message, sub = "") => {
     setNotice({ type, message, sub });
   };
+
+  /* ─── fetch UI config once on boot ───────────────────────────── */
+  useEffect(() => {
+    fetch("/api/ui-config")
+      .then(r => r.json())
+      .then(j => setUiCfg({
+        appTitle      : j.appTitle       || "",
+        appDescription: j.appDescription || "",
+        downloadOnly  : Boolean(j.downloadOnly),
+      }))
+      .catch(() => {/* keep defaults */});
+  }, []);
 
   /* ─── fetch style once on boot ─────────────────────────────── */
   useEffect(() => {
@@ -58,11 +77,30 @@ export default function App() {
     setAdd(false); setChart(null);
   };
 
+  /* ─── derive display title ─────────────────────────────────── */
+  const title = uiCfg.appTitle || "Argo App Manager";
+  /* split first word for accent colouring */
+  const spaceIdx   = title.indexOf(" ");
+  const titleFirst = spaceIdx > 0 ? title.slice(0, spaceIdx) : title;
+  const titleRest  = spaceIdx > 0 ? title.slice(spaceIdx) : "";
+
   return (
     <div className="app-wrapper" style={{ position: "relative" }}>
       {/* ── sticky top bar ────────────────────────────────────── */}
       <header className="top-bar">
-        <h1><span>Argo</span> App Manager</h1>
+        <div>
+          <h1><span>{titleFirst}</span>{titleRest}</h1>
+          {uiCfg.appDescription && (
+            <p style={{
+              margin: ".15rem 0 0",
+              fontSize: ".82rem",
+              color: "var(--text-light)",
+              lineHeight: 1.4,
+            }}>
+              {uiCfg.appDescription}
+            </p>
+          )}
+        </div>
         <ThemeToggle />
       </header>
 
@@ -81,6 +119,7 @@ export default function App() {
         <ValuesEditor
           chart={chart}
           installStyle={installStyle}  /* ← auto */
+          forceDownloadOnly={uiCfg.downloadOnly}
           onBack={exitInstall}
           onNotify={notify}
         />

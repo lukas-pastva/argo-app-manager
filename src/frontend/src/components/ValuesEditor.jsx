@@ -42,6 +42,7 @@ const fmtDate = (iso) => {
 export default function ValuesEditor({
   chart,
   installStyle = "name",
+  forceDownloadOnly = false,
   onBack,
   onNotify = () => {},
 }) {
@@ -60,7 +61,7 @@ export default function ValuesEditor({
   const [appCode, setCode ] = useState("");
 
   /* misc ui state --------------------------------------------- */
-  const [downloadOnly, setDL] = useState(false);   // ← checkbox
+  const [downloadOnly, setDL] = useState(forceDownloadOnly);   // ← checkbox
   const [friendly, setFr]     = useState(false);
   const [preview,  setPre]    = useState(null);
   const [full,     setFull]   = useState(false);
@@ -333,16 +334,18 @@ export default function ValuesEditor({
         </select>
       ) : <em>no versions found</em>}
 
-      {/* ⬇ DOWNLOAD-ONLY CHECKBOX – moved up ⬇ */}
-      <label style={{ marginTop: "1rem", display: "flex", gap: ".5rem" }}>
-        <input
-          type="checkbox"
-          checked={downloadOnly}
-          onChange={e => setDL(e.target.checked)}
-          style={{ transform: "translateY(2px)" }}
-        />
-        <span>I only want to download this Helm chart (do not install)</span>
-      </label>
+      {/* ⬇ DOWNLOAD-ONLY CHECKBOX – hidden when forced by env ⬇ */}
+      {!forceDownloadOnly && (
+        <label style={{ marginTop: "1rem", display: "flex", gap: ".5rem" }}>
+          <input
+            type="checkbox"
+            checked={downloadOnly}
+            onChange={e => setDL(e.target.checked)}
+            style={{ transform: "translateY(2px)" }}
+          />
+          <span>I only want to download this Helm chart (do not install)</span>
+        </label>
+      )}
 
       {/* identifiers – hidden when downloadOnly */}
       {!downloadOnly && (
