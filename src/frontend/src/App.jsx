@@ -9,15 +9,10 @@ import ValuesEditor from "./components/ValuesEditor.jsx";
 import Notice          from "./components/Notice.jsx";
 import InstalledCharts from "./components/InstalledCharts.jsx";
 
-/* ─── tiny helpers for URL search-param handling ─────────────── */
-function readSearch()  { return new URLSearchParams(window.location.search); }
-function pushSearch(p) { window.history.pushState(null, "", `?${p}`); }
-
 export default function App() {
   const [files,        setFiles]   = useState([]);
   const [activeFile,   setActive]  = useState("");
   const [chart,        setChart]   = useState(null);
-  const [adding,       setAdd]     = useState(false);
   const [installStyle, setStyle]   = useState("name");   // auto-detected
 
   /* UI config from backend env variables ------------------------ */
@@ -66,20 +61,6 @@ export default function App() {
       });
   }, []);
 
-  /* ─── init from URL (?mode=install) ────────────────────────── */
-  useEffect(() => {
-    if (readSearch().get("mode") === "install") setAdd(true);
-  }, []);
-
-  const startInstall = () => {
-    const sp = readSearch(); sp.set("mode", "install"); pushSearch(sp);
-    setAdd(true);
-  };
-  const exitInstall  = () => {
-    const sp = readSearch(); sp.delete("mode"); pushSearch(sp);
-    setAdd(false); setChart(null);
-  };
-
   /* ─── derive display title ─────────────────────────────────── */
   const title = uiCfg.appTitle || "Argo App Manager";
   /* split first word for accent colouring */
@@ -110,30 +91,21 @@ export default function App() {
       {files.length > 0 &&
         <Tabs files={files} active={activeFile} onSelect={setActive} />}
 
-      <button className="btn" style={{ marginBottom: "1.2rem" }} onClick={startInstall}>
-        + Install chart
-      </button>
-
-      {!adding ? (
-        /* normal view ------------------------------------------------------ */
-        <>
-          {uiCfg.hasHelmCharts && <InstalledCharts />}
-          <AppsList file={activeFile} onNotify={notify} />
-        </>
-      ) : chart ? (
-        /* install flow ----------------------------------------------------- */
+      {chart ? (
+        /* install / download flow ------------------------------------------ */
         <ValuesEditor
           chart={chart}
-          installStyle={installStyle}  /* ← auto */
+          installStyle={installStyle}
           forceDownloadOnly={uiCfg.downloadOnly}
-          onBack={exitInstall}
+          onBack={() => setChart(null)}
           onNotify={notify}
         />
       ) : (
-        /* choose chart ----------------------------------------------------- */
+        /* home – search + installed charts --------------------------------- */
         <>
-          <button className="btn-secondary btn-back" onClick={exitInstall}>← Back</button>
           <ChartSearch onSelect={setChart} />
+          {uiCfg.hasHelmCharts && <InstalledCharts />}
+          {!uiCfg.downloadOnly && <AppsList file={activeFile} onNotify={notify} />}
         </>
       )}
 

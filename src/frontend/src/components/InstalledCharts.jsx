@@ -61,7 +61,7 @@ export default function InstalledCharts() {
         <input
           className="installed-filter"
           type="text"
-          placeholder="Filter charts..."
+          placeholder="Filter installed..."
           value={filter}
           onChange={e => setFilter(e.target.value)}
         />
