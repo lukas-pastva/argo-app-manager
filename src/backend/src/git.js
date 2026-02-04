@@ -4,7 +4,7 @@ import fs            from "fs/promises";
 import path          from "node:path";
 import cfg           from "./config.js";
 
-const DIR    = path.join("/app", ".cache", "gitops-readonly");
+const DIR    = path.join("/tmp", "gitops-readonly");
 const branch = cfg.gitBranch;
 
 export async function ensureRepo() {
@@ -16,9 +16,7 @@ export async function ensureRepo() {
 
   await fs.mkdir(DIR, { recursive: true });
 
-  const keyDir  = path.join("/app", ".cache");
-  await fs.mkdir(keyDir, { recursive: true });
-  const keyPath = path.join(keyDir, "git_key");
+  const keyPath = path.join("/tmp", "git_key");
   const pem = cfg.gitKey?.includes("BEGIN")
     ? cfg.gitKey
     : Buffer.from(cfg.gitKey || "", "base64").toString("utf8");
