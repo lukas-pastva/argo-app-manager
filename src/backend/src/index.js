@@ -76,8 +76,8 @@ app.use(express.json({ limit: "2mb" }));
 app.use(express.static("public"));
 app.get("/favicon.ico", (_q, r) => r.status(204).end());
 
-/* ────────── detect style once on boot ───────────────────────── */
-detectStyle().catch(() => {});
+/* ────────── detect style once on boot (skip in download-only) ─ */
+if (!cfg.downloadOnly) detectStyle().catch(() => {});
 
 /* ════════════════════════════════════════════════════════════════
    0.  Expose detected style
@@ -113,6 +113,7 @@ app.get("/api/installed-charts", async (_req, res) => {
    1.  List app-of-apps YAML files (sidebar)
    ═══════════════════════════════════════════════════════════════ */
 app.get("/api/files", async (_req, res) => {
+  if (cfg.downloadOnly) return res.json([]);
   const files = await listAppFiles();
   res.json(files);
 });
@@ -121,6 +122,7 @@ app.get("/api/files", async (_req, res) => {
    2.  Flatten `appProjects[].applications[]`  – namespace required
    ═══════════════════════════════════════════════════════════════ */
 app.get("/api/apps", async (req, res) => {
+  if (cfg.downloadOnly) return res.json([]);
   const targets = req.query.file ? [req.query.file] : await listAppFiles();
   const flat    = [];
 
