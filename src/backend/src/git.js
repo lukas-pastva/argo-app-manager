@@ -1,11 +1,10 @@
 import fg            from "fast-glob";
 import { spawnSync } from "node:child_process";
 import fs            from "fs/promises";
-import os            from "node:os";
 import path          from "node:path";
 import cfg           from "./config.js";
 
-const DIR    = path.join(os.tmpdir(), "gitops-readonly");
+const DIR    = path.join("/app", ".cache", "gitops-readonly");
 const branch = cfg.gitBranch;
 
 export async function ensureRepo() {
@@ -17,7 +16,9 @@ export async function ensureRepo() {
 
   await fs.mkdir(DIR, { recursive: true });
 
-  const keyPath = path.join(os.tmpdir(), "git_key");
+  const keyDir  = path.join("/app", ".cache");
+  await fs.mkdir(keyDir, { recursive: true });
+  const keyPath = path.join(keyDir, "git_key");
   const pem = cfg.gitKey?.includes("BEGIN")
     ? cfg.gitKey
     : Buffer.from(cfg.gitKey || "", "base64").toString("utf8");

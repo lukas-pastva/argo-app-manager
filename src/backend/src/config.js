@@ -33,6 +33,6 @@ export default {
   downloadOnly  : (process.env.DOWNLOAD_ONLY || "").toLowerCase() === "true",
 
   /* misc */
-  chartCacheDir: "/tmp/chart-cache",
+  chartCacheDir: "/app/.cache/chart-cache",
   port: Number(process.env.PORT) || 8080
 };
