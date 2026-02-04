@@ -60,15 +60,17 @@ export default function App() {
 
   return (
     <div className="app-wrapper" style={{ position: "relative" }}>
-      <ThemeToggle />
+      {/* ── sticky top bar ────────────────────────────────────── */}
+      <header className="top-bar">
+        <h1><span>Argo</span> App Manager</h1>
+        <ThemeToggle />
+      </header>
 
       {files.length > 0 &&
         <Tabs files={files} active={activeFile} onSelect={setActive} />}
 
-      <h1>Argo App Manager</h1>
-
       <button className="btn" style={{ marginBottom: "1.2rem" }} onClick={startInstall}>
-        ＋ Install chart
+        + Install chart
       </button>
 
       {!adding ? (
