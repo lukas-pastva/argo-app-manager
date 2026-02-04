@@ -1,83 +1,151 @@
-import fg            from "fast-glob";
-import { spawnSync } from "node:child_process";
-import fs            from "fs/promises";
-import path          from "node:path";
-import cfg           from "./config.js";
+/*  git.js  –  GitLab REST API client
+    ─────────────────────────────────────────────────────────────── */
 
-const DIR    = path.join("/tmp", "gitops-readonly");
-const branch = cfg.gitBranch;
+import axios from "axios";
+import https from "node:https";
+import cfg   from "./config.js";
 
-export async function ensureRepo() {
-  if (await exists(path.join(DIR, ".git"))) {
-    spawnSync("git", ["-C", DIR, "fetch", "--quiet"]);
-    spawnSync("git", ["-C", DIR, "reset", "--hard", `origin/${branch}`]);
-    return DIR;
+/* ─── API client ───────────────────────────────────────────── */
+const api = axios.create({
+  baseURL    : `${cfg.gitlabUrl}/api/v4`,
+  headers    : { "PRIVATE-TOKEN": cfg.gitlabToken },
+  timeout    : 30_000,
+  httpsAgent : new https.Agent({ rejectUnauthorized: false }),
+});
+
+const projId = cfg.gitlabProject;   // numeric ID – no encoding needed
+
+/* ─── core helpers ─────────────────────────────────────────── */
+
+/**
+ * Read a single file from the repo.  Returns "" if not found.
+ */
+export async function readFile(filePath) {
+  try {
+    const enc = encodeURIComponent(filePath);
+    const { data } = await api.get(
+      `/projects/${projId}/repository/files/${enc}/raw`,
+      { params: { ref: cfg.gitBranch }, responseType: "text" },
+    );
+    return typeof data === "string" ? data : JSON.stringify(data);
+  } catch (e) {
+    if (e.response?.status === 404) return "";
+    console.error(`[gitlab] readFile("${filePath}") error:`, e.message);
+    return "";
   }
-
-  await fs.mkdir(DIR, { recursive: true });
-
-  const keyPath = path.join("/tmp", "git_key");
-  const pem = cfg.gitKey?.includes("BEGIN")
-    ? cfg.gitKey
-    : Buffer.from(cfg.gitKey || "", "base64").toString("utf8");
-  await fs.writeFile(keyPath, pem.replace(/\\n/g, "\n"), { mode: 0o600 });
-
-  process.env.GIT_SSH_COMMAND =
-    `ssh -i ${keyPath} -o StrictHostKeyChecking=accept-new`;
-
-  spawnSync("git", ["clone", "--depth", "1", "--branch", branch,
-    cfg.gitRepo, DIR], { stdio: "inherit" });
-
-  console.log("[DEBUG] Git repo cloned to", DIR);
-
-  return DIR;
 }
 
+/**
+ * List repository tree entries (paginated).
+ */
+async function listTree(treePath = "", recursive = false) {
+  const items = [];
+  let page = 1;
+  while (true) {
+    const { data } = await api.get(
+      `/projects/${projId}/repository/tree`,
+      {
+        params: {
+          ref      : cfg.gitBranch,
+          path     : treePath || undefined,
+          recursive,
+          per_page : 100,
+          page,
+        },
+      },
+    );
+    items.push(...data);
+    if (data.length < 100) break;
+    page++;
+  }
+  return items;
+}
+
+/* ─── glob matcher ─────────────────────────────────────────── */
+
+/**
+ * Tiny glob-to-regex for the patterns this app uses.
+ * Supports:  **  *  ?(x)  literal chars
+ */
+function globToRegex(glob) {
+  let re = "";
+  let i  = 0;
+  while (i < glob.length) {
+    const c = glob[i];
+    if (c === "*" && glob[i + 1] === "*") {
+      re += ".*";
+      i += 2;
+      if (glob[i] === "/") i++;          // skip trailing / after **
+    } else if (c === "*") {
+      re += "[^/]*";
+      i++;
+    } else if (c === "?" && glob[i + 1] === "(") {
+      const close = glob.indexOf(")", i + 2);
+      const inner = glob.slice(i + 2, close);
+      re += "(" + inner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")?";
+      i = close + 1;
+    } else if (".+^${}()|[]\\".includes(c)) {
+      re += "\\" + c;
+      i++;
+    } else {
+      re += c;
+      i++;
+    }
+  }
+  return new RegExp("^" + re + "$");
+}
+
+/* ─── public API ───────────────────────────────────────────── */
+
+/**
+ * List app-of-apps YAML files matching APPS_GLOB.
+ * Returns repo-relative paths.
+ */
 export async function listAppFiles() {
-  const dir = await ensureRepo();
-  console.log(`[DEBUG] Using APPS_GLOB="${cfg.appsGlob}" in ${dir}`);
-  const files = await fg(cfg.appsGlob, { cwd: dir, absolute: true });
-  console.log(`[DEBUG] listAppFiles() found ${files.length} files:`, files);
+  const tree    = await listTree("", true);
+  const pattern = globToRegex(cfg.appsGlob);
+  const files   = tree
+    .filter(item => item.type === "blob" && pattern.test(item.path))
+    .map(item => item.path);
+
+  console.log(`[gitlab] listAppFiles: found ${files.length} matching "${cfg.appsGlob}"`);
   return files;
 }
 
 /**
- * Scan  <repoRoot>/<helmChartsPath>/<publisher>/<chart>/<version>/
+ * Scan  <helmChartsPath>/<publisher>/<chart>/<version>/
  * Returns [ { publisher, chart, versions: ["1.2.3", …] }, … ]
  */
 export async function listInstalledCharts() {
   if (!cfg.helmChartsPath) return [];
 
-  const dir = await ensureRepo();
-  const chartsDir = path.join(dir, cfg.helmChartsPath);
-  if (!(await exists(chartsDir))) return [];
+  try {
+    const tree = await listTree(cfg.helmChartsPath, true);
+    const prefix = cfg.helmChartsPath + "/";
 
-  const result = [];
-
-  const publishers = await readDirs(chartsDir);
-  for (const pub of publishers) {
-    const pubDir = path.join(chartsDir, pub);
-    const charts = await readDirs(pubDir);
-    for (const chart of charts) {
-      const chartDir = path.join(pubDir, chart);
-      const versions = await readDirs(chartDir);
-      if (versions.length) {
-        result.push({ publisher: pub, chart, versions });
+    // collect 3-level deep directories:  publisher / chart / version
+    const map = new Map();                    // "pub/chart" → [versions]
+    for (const item of tree) {
+      if (item.type !== "tree") continue;
+      const rel   = item.path.startsWith(prefix) ? item.path.slice(prefix.length) : item.path;
+      const parts = rel.split("/");
+      if (parts.length === 3) {
+        const key = `${parts[0]}/${parts[1]}`;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(parts[2]);
       }
     }
+
+    const result = [];
+    for (const [key, versions] of map) {
+      const [publisher, chart] = key.split("/");
+      result.push({ publisher, chart, versions: versions.sort() });
+    }
+
+    console.log(`[gitlab] listInstalledCharts: found ${result.length} charts`);
+    return result;
+  } catch (e) {
+    console.error("[gitlab] listInstalledCharts error:", e.message);
+    return [];
   }
-
-  return result;
-}
-
-/* ─── util ─────────────────────────────────────────────────── */
-async function exists(p) {
-  try { await fs.stat(p); return true; } catch { return false; }
-}
-
-async function readDirs(dir) {
-  try {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-    return entries.filter(e => e.isDirectory()).map(e => e.name).sort();
-  } catch { return []; }
 }

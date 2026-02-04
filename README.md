@@ -1,114 +1,161 @@
-# Argo App Manager 🚀
+# Argo App Manager
 
-A **tiny Git‑based web UI** that lets you add / remove Helm charts in your GitOps
-*app‑of‑apps* repo and trigger an Argo Workflow (or any webhook).  
-One container = React + Express + Helm.
-
----
-
-## ✨ Features
-
-|  |  |
-|--|--|
-| 🔍 **ArtifactHub search** | type three letters, pick a chart & version (with release date) |
-| ✍️ **YAML diff editor** | only your changes are stored; defaults stay in the chart |
-| 🗂 **Tabs per cluster/env** | each `app‑of‑apps*.yaml` file becomes a tab |
-| 🌑 **Dark / Light / Auto** | theme switch with local persistence |
-| 📅 **Version dates** | see when each chart version was published |
-| 🗑 **One‑click delete** | removes an Application via webhook |
-| 🛠 **Pure Git & Helm** | UI needs **no** K8s credentials |
+A web UI for managing Helm charts in a GitOps app-of-apps repository.
+Reads from GitLab via API, triggers deployments via webhooks (Argo Workflows or any HTTP endpoint).
+Single container: React frontend + Express backend.
 
 ---
 
-## 🚀 Quick start (stand‑alone Docker)
+## Features
+
+- **ArtifactHub search** -- type three letters, pick a chart and version (with release dates)
+- **YAML diff editor** -- only your overrides are stored; chart defaults stay untouched
+- **Tabs per cluster/env** -- each `app-of-apps*.yaml` file becomes a sidebar tab
+- **Dark / Light / Auto theme** -- segmented toggle, persisted in localStorage
+- **Installed charts view** -- shows existing charts from the repo grouped by publisher
+- **Download-only mode** -- optional mode that only pulls charts without creating Applications
+- **Custom branding** -- configurable title and description via environment variables
+- **One-click delete** -- removes an Application via webhook
+- **No K8s credentials needed** -- the UI only talks to GitLab API and webhooks
+
+---
+
+## Quick start
 
 ```bash
-docker build -t argo-app-manager .
+docker build -t argo-app-manager ./src
 
-docker run -p 8080:8080   -e GIT_REPO_SSH=git@github.com:my-org/argo-apps.git   -e GIT_SSH_KEY="$(cat ~/.ssh/id_ed25519)"   -e WF_WEBHOOK_URL=https://argo.example.com/api/helm-deploy   # optional overrides ⤵
-  -e APPS_GLOB="stage-*.yaml"    argo-app-manager
+docker run -p 8080:8080 \
+  -e GITLAB_URL=https://gitlab.example.com \
+  -e GITLAB_PROJECT_ID=42 \
+  -e GITLAB_TOKEN=glpat-xxxxxxxxxxxx \
+  -e WF_WEBHOOK_URL=https://argo.example.com/api/helm-deploy \
+  argo-app-manager
 ```
 
 Open <http://localhost:8080>
 
-> Only a *read‑only* clone is kept inside the UI container – all **writes**
-> happen in the CI job that runs `handle-helm-deploy.sh`.
-
 ---
 
-## 🌡 Environment variables
+## Environment variables
 
-### Backend container
+### Required
+
+| Variable | Purpose |
+|----------|---------|
+| `GITLAB_URL` | GitLab instance URL (e.g. `https://gitlab.example.com`) |
+| `GITLAB_PROJECT_ID` | Numeric GitLab project ID |
+| `GITLAB_TOKEN` | GitLab personal/project access token (`read_api` scope) |
+
+### Git
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| **`GIT_REPO_SSH`** | — | GitOps repo to clone (read‑only) |
-| `GIT_BRANCH` | `main` | Branch to pull |
-| **`GIT_SSH_KEY`** or `GIT_SSH_KEY_B64` | — | Private key (plain or base64) |
-| **`WF_WEBHOOK_URL`** | — | Deploy webhook URL |
-| `WF_DELETE_WEBHOOK_URL` | `${WF_WEBHOOK_URL}/delete` | Delete webhook |
-| `WF_UPGRADE_WEBHOOK_URL` | `${WF_WEBHOOK_URL}/upgrade` | Upgrade webhook |
-| **`WF_DOWNLOAD_WEBHOOK_URL`** | — | Download-only webhook URL |
-| `WF_TOKEN` | — | Bearer token added to webhooks |
-| `PORT` | `8080` | Port UI listens on |
-| `APPS_GLOB` | `app-of-apps*.y?(a)ml` | File-mask for repo scan |
+| `GIT_BRANCH` | `main` | Branch to read from |
+| `APPS_GLOB` | `app-of-apps*.y?(a)ml` | Glob pattern for app-of-apps YAML files |
 
-### Helper script `handle-helm-deploy.sh`
+### Webhooks
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `APPS_DIR` | `clusters` | Base folder for app‑of‑apps files |
-| `VALUES_SUBDIR` | `values` | Overrides sub-folder |
-| `PUSH_BRANCH` | `main` | Branch for Git push |
+| `WF_WEBHOOK_URL` | -- | Install webhook URL |
+| `WF_DELETE_WEBHOOK_URL` | -- | Delete webhook URL |
+| `WF_UPGRADE_WEBHOOK_URL` | -- | Upgrade webhook URL |
+| `WF_DOWNLOAD_WEBHOOK_URL` | -- | Download-only webhook URL |
+| `WF_TOKEN` | -- | Bearer token sent with webhook requests |
+
+### UI customisation
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `APP_TITLE` | `Argo App Manager` | Custom heading shown in the top bar |
+| `APP_DESCRIPTION` | -- | Description text below the title |
+| `DOWNLOAD_ONLY` | `false` | When `true`, only download mode is available (no install) |
+
+### Installed charts
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `HELM_CHARTS_PATH` | -- | Repo-relative path to installed charts (e.g. `external/charts`). When set, the main page shows existing charts grouped by publisher. Expected structure: `<path>/<publisher>/<chart>/<version>/` |
+
+### Misc
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PORT` | `8080` | Port the server listens on |
 
 ---
 
-## 🛰 Webhook payloads
+## Webhook payloads
 
-### Deploy (POST `WF_WEBHOOK_URL`)
+### Install (POST `WF_WEBHOOK_URL`)
 
 ```json
 {
   "chart": "grafana",
-  "repo":  "https://charts.bitnami.com/bitnami",
+  "repo": "https://charts.bitnami.com/bitnami",
   "version": "7.3.2",
   "owner": "bitnami",
-  "name": "grafana",     // application / release name
-  "release": "grafana",  // legacy field, same as name
+  "name": "grafana",
+  "release": "grafana",
   "namespace": "monitoring",
-  "userValuesYaml": "..."  // base64‑encoded delta YAML
+  "userValuesYaml": "..."
 }
 ```
 
-### Delete (POST `WF_DELETE_WEBHOOK_URL`)
+### Delete (POST `WF_DELETE_WEBHOOK_URL`)
 
 ```json
 { "release": "grafana", "namespace": "monitoring" }
 ```
 
-### Upgrade (POST `WF_UPGRADE_WEBHOOK_URL`)
+### Upgrade (POST `WF_UPGRADE_WEBHOOK_URL`)
 
 ```json
 {
   "chart": "grafana",
-  "repo":  "https://charts.bitnami.com/bitnami",
+  "repo": "https://charts.bitnami.com/bitnami",
   "version": "8.2.1",
   "owner": "bitnami",
   "release": "grafana",
   "namespace": "monitoring",
-  "userValuesYaml": "..."  
+  "userValuesYaml": "..."
 }
 ```
 
-### Download-only (POST `WF_DOWNLOAD_WEBHOOK_URL`)
+### Download (POST `WF_DOWNLOAD_WEBHOOK_URL`)
 
 ```json
 {
   "chart": "grafana",
-  "repo":  "https://charts.bitnami.com/bitnami",
+  "repo": "https://charts.bitnami.com/bitnami",
   "version": "7.3.2",
   "owner": "bitnami",
   "release": "grafana"
 }
 ```
 
+---
+
+## Kubernetes deployment
+
+The container runs as a non-root user and needs no writable filesystem. Example env snippet for a Kubernetes deployment:
+
+```yaml
+env:
+  - name: GITLAB_URL
+    value: "https://gitlab.example.com"
+  - name: GITLAB_PROJECT_ID
+    value: "42"
+  - name: GITLAB_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: secret
+        key: YAML_GITLAB_TOKEN
+  - name: GIT_BRANCH
+    value: "main"
+  - name: WF_WEBHOOK_URL
+    value: "https://argo.example.com/api/helm-deploy"
+  - name: HELM_CHARTS_PATH
+    value: "external/charts"
+```

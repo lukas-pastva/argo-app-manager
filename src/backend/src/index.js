@@ -1,5 +1,5 @@
 /*  ────────────────────────────────────────────────────────────────
-    argo-app-manager – backend
+    argo-app-manager – backend  (GitLab API version)
     © 2025 • MIT • @lukas
     ──────────────────────────────────────────────────────────────── */
 
@@ -7,13 +7,12 @@ import express  from "express";
 import helmet   from "helmet";
 import axios    from "axios";
 import yaml     from "js-yaml";
-import fs       from "fs/promises";
 import path     from "node:path";
 import semver   from "semver";
 
-import cfg                          from "./config.js";
-import { ensureRepo, listAppFiles, listInstalledCharts } from "./git.js";
-import { deltaYaml }                from "./diff.js";
+import cfg                                           from "./config.js";
+import { readFile, listAppFiles, listInstalledCharts } from "./git.js";
+import { deltaYaml }                                 from "./diff.js";
 import {
   triggerWebhook,
   triggerDeleteWebhook,
@@ -27,18 +26,18 @@ export const VALUES_SUBDIR = process.env.VALUES_SUBDIR || "values";
 const ARTHUB_BASE          = "https://artifacthub.io/api/v1";
 
 /* ───────── globals ───────────────────────────────────────────── */
-let gitRoot      = "";
 let installStyle = "name";           // "name" | "trio"  (auto-detected)
 
-/* ───────── helper – detect style once after clone ───────────── */
+/* ───────── helper – detect style on first request ────────────── */
 async function detectStyle() {
   try {
     const files = await listAppFiles();
     if (!files.length) return;
 
-    const doc    = yaml.load(await fs.readFile(files[0], "utf8")) ?? {};
-    const firstP = (doc.appProjects || [])[0] || {};
-    const firstA = (firstP.applications || [])[0] || {};
+    const content = await readFile(files[0]);
+    const doc     = yaml.load(content) ?? {};
+    const firstP  = (doc.appProjects || [])[0] || {};
+    const firstA  = (firstP.applications || [])[0] || {};
 
     installStyle =
       firstA.applicationCode && !firstA.name ? "trio" : "name";
@@ -77,18 +76,11 @@ app.use(express.json({ limit: "2mb" }));
 app.use(express.static("public"));
 app.get("/favicon.ico", (_q, r) => r.status(204).end());
 
-/* ────────── clone repos once on boot ─────────────────────────── */
-ensureRepo()
-  .then(async dir => {
-    gitRoot = dir;
-    console.log("[BOOT] Git repo cloned →", dir);
-    await detectStyle();
-  })
-  .catch(err => console.error("❌  Git clone failed:", err));
-
+/* ────────── detect style once on boot ───────────────────────── */
+detectStyle().catch(() => {});
 
 /* ════════════════════════════════════════════════════════════════
-   NEW → 0.  Expose detected style
+   0.  Expose detected style
    ═══════════════════════════════════════════════════════════════ */
 app.get("/api/install-style", (_q, r) => r.json({ style: installStyle }));
 
@@ -105,7 +97,7 @@ app.get("/api/ui-config", (_q, r) =>
 );
 
 /* ════════════════════════════════════════════════════════════════
-   0-c.  Installed helm charts (from optional second repo)
+   0-c.  Installed helm charts
    ═══════════════════════════════════════════════════════════════ */
 app.get("/api/installed-charts", async (_req, res) => {
   try {
@@ -122,7 +114,7 @@ app.get("/api/installed-charts", async (_req, res) => {
    ═══════════════════════════════════════════════════════════════ */
 app.get("/api/files", async (_req, res) => {
   const files = await listAppFiles();
-  res.json(files.map(p => path.resolve(p)));
+  res.json(files);
 });
 
 /* ════════════════════════════════════════════════════════════════
@@ -133,7 +125,8 @@ app.get("/api/apps", async (req, res) => {
   const flat    = [];
 
   for (const f of targets) {
-    const doc = yaml.load(await fs.readFile(f, "utf8")) ?? {};
+    const content = await readFile(f);
+    const doc     = yaml.load(content) ?? {};
     (doc.appProjects || []).forEach(p => {
       if (!p.namespace) return;
       (p.applications || []).forEach(a =>
@@ -154,21 +147,20 @@ app.get("/api/app/values", async (req, res) => {
   if (!name || !yamlFile || !chartPath)
     return res.status(400).json({ error: "name, file & path required" });
 
-  const overrideFile = path.join(
-    path.dirname(yamlFile),
+  const overridePath = path.posix.join(
+    path.posix.dirname(yamlFile),
     VALUES_SUBDIR,
     `${name}.yaml`,
   );
-  const chartDir   = path.join(gitRoot, CHARTS_ROOT, chartPath);
-  const safeRead   = p => fs.readFile(p, "utf8").catch(() => "");
+  const chartDir = path.posix.join(CHARTS_ROOT, chartPath);
 
-  const defaultVals  = await safeRead(path.join(chartDir, "values.yaml"));
-  const overrideVals = await safeRead(overrideFile);
+  const defaultVals  = await readFile(path.posix.join(chartDir, "values.yaml"));
+  const overrideVals = await readFile(overridePath);
 
   /* mini-meta from Chart.yaml – optional */
   let meta = {};
   try {
-    const c = yaml.load(await safeRead(path.join(chartDir, "Chart.yaml"))) || {};
+    const c = yaml.load(await readFile(path.posix.join(chartDir, "Chart.yaml"))) || {};
     meta = {
       description : c.description || "",
       home        : c.home        || "",
@@ -177,9 +169,9 @@ app.get("/api/app/values", async (req, res) => {
   } catch {/* ignore */}
 
   console.log(
-    `[vals-file] ${name}\n` +
-    `           override: ${overrideVals ? "✔︎" : "✖︎"} → ${overrideFile}\n` +
-    `           default : ${defaultVals ? "✔︎" : "✖︎"} → ${chartDir}/values.yaml`,
+    `[vals] ${name}\n` +
+    `       override: ${overrideVals ? "✔︎" : "✖︎"} → ${overridePath}\n` +
+    `       default : ${defaultVals ? "✔︎" : "✖︎"} → ${chartDir}/values.yaml`,
   );
 
   res.json({
