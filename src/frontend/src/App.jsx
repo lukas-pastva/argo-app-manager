@@ -6,7 +6,8 @@ import ThemeToggle  from "./components/ThemeToggle.jsx";
 import AppsList     from "./components/AppsList.jsx";
 import ChartSearch  from "./components/ChartSearch.jsx";
 import ValuesEditor from "./components/ValuesEditor.jsx";
-import Notice       from "./components/Notice.jsx";
+import Notice          from "./components/Notice.jsx";
+import InstalledCharts from "./components/InstalledCharts.jsx";
 
 /* ─── tiny helpers for URL search-param handling ─────────────── */
 function readSearch()  { return new URLSearchParams(window.location.search); }
@@ -24,6 +25,7 @@ export default function App() {
     appTitle: "",
     appDescription: "",
     downloadOnly: false,
+    hasHelmCharts: false,
   });
 
   /* centralised notice state ----------------------------------- */
@@ -41,6 +43,7 @@ export default function App() {
         appTitle      : j.appTitle       || "",
         appDescription: j.appDescription || "",
         downloadOnly  : Boolean(j.downloadOnly),
+        hasHelmCharts : Boolean(j.hasHelmCharts),
       }))
       .catch(() => {/* keep defaults */});
   }, []);
@@ -113,7 +116,10 @@ export default function App() {
 
       {!adding ? (
         /* normal view ------------------------------------------------------ */
-        <AppsList file={activeFile} onNotify={notify} />
+        <>
+          {uiCfg.hasHelmCharts && <InstalledCharts />}
+          <AppsList file={activeFile} onNotify={notify} />
+        </>
       ) : chart ? (
         /* install flow ----------------------------------------------------- */
         <ValuesEditor

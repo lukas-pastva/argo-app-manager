@@ -24,6 +24,9 @@ export default {
 
   webhookTok: process.env.WF_TOKEN || "",
 
+  /* Installed charts (optional – shows existing charts on main page) */
+  helmChartsPath  : process.env.HELM_CHARTS_PATH || "",  // e.g. "external/charts"
+
   /* UI customisation */
   appTitle      : process.env.APP_TITLE       || "",
   appDescription: process.env.APP_DESCRIPTION || "",

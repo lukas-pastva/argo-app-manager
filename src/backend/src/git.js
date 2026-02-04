@@ -28,7 +28,7 @@ export async function ensureRepo() {
 
   spawnSync("git", ["clone", "--depth", "1", "--branch", branch,
     cfg.gitRepo, DIR], { stdio: "inherit" });
-    
+
   console.log("[DEBUG] Git repo cloned to", DIR);
 
   return DIR;
@@ -42,6 +42,43 @@ export async function listAppFiles() {
   return files;
 }
 
+/**
+ * Scan  <repoRoot>/<helmChartsPath>/<publisher>/<chart>/<version>/
+ * Returns [ { publisher, chart, versions: ["1.2.3", …] }, … ]
+ */
+export async function listInstalledCharts() {
+  if (!cfg.helmChartsPath) return [];
+
+  const dir = await ensureRepo();
+  const chartsDir = path.join(dir, cfg.helmChartsPath);
+  if (!(await exists(chartsDir))) return [];
+
+  const result = [];
+
+  const publishers = await readDirs(chartsDir);
+  for (const pub of publishers) {
+    const pubDir = path.join(chartsDir, pub);
+    const charts = await readDirs(pubDir);
+    for (const chart of charts) {
+      const chartDir = path.join(pubDir, chart);
+      const versions = await readDirs(chartDir);
+      if (versions.length) {
+        result.push({ publisher: pub, chart, versions });
+      }
+    }
+  }
+
+  return result;
+}
+
+/* ─── util ─────────────────────────────────────────────────── */
 async function exists(p) {
   try { await fs.stat(p); return true; } catch { return false; }
+}
+
+async function readDirs(dir) {
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    return entries.filter(e => e.isDirectory()).map(e => e.name).sort();
+  } catch { return []; }
 }

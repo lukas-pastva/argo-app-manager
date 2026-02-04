@@ -12,7 +12,7 @@ import path     from "node:path";
 import semver   from "semver";
 
 import cfg                          from "./config.js";
-import { ensureRepo, listAppFiles } from "./git.js";
+import { ensureRepo, listAppFiles, listInstalledCharts } from "./git.js";
 import { deltaYaml }                from "./diff.js";
 import {
   triggerWebhook,
@@ -77,7 +77,7 @@ app.use(express.json({ limit: "2mb" }));
 app.use(express.static("public"));
 app.get("/favicon.ico", (_q, r) => r.status(204).end());
 
-/* ────────── clone repo once on boot ──────────────────────────── */
+/* ────────── clone repos once on boot ─────────────────────────── */
 ensureRepo()
   .then(async dir => {
     gitRoot = dir;
@@ -85,6 +85,7 @@ ensureRepo()
     await detectStyle();
   })
   .catch(err => console.error("❌  Git clone failed:", err));
+
 
 /* ════════════════════════════════════════════════════════════════
    NEW → 0.  Expose detected style
@@ -99,8 +100,22 @@ app.get("/api/ui-config", (_q, r) =>
     appTitle      : cfg.appTitle,
     appDescription: cfg.appDescription,
     downloadOnly  : cfg.downloadOnly,
+    hasHelmCharts : Boolean(cfg.helmChartsPath),
   }),
 );
+
+/* ════════════════════════════════════════════════════════════════
+   0-c.  Installed helm charts (from optional second repo)
+   ═══════════════════════════════════════════════════════════════ */
+app.get("/api/installed-charts", async (_req, res) => {
+  try {
+    const charts = await listInstalledCharts();
+    res.json(charts);
+  } catch (e) {
+    console.error("[installed-charts] error:", e.message);
+    res.json([]);
+  }
+});
 
 /* ════════════════════════════════════════════════════════════════
    1.  List app-of-apps YAML files (sidebar)
