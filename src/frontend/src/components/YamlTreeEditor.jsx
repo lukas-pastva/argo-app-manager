@@ -1,7 +1,8 @@
-/*  YamlTreeEditor.jsx – v5
+/*  YamlTreeEditor.jsx – v6
     • Scroll position preserved when editing
     • Help ℹ icon larger & placed to the far-left
     • Tooltip only on icon hover
+    • Expanding a node shows first few children; "More" reveals the rest
 */
 import React, { useState, useCallback, useMemo, useRef } from "react";
 import yaml from "js-yaml";
@@ -28,6 +29,8 @@ export default function YamlTreeEditor({ yamlText="", onChange }){
 
   /* expansion state */
   const [expanded,setExp]=useState(new Set());
+  const [showAll,setShowAll]=useState(new Set()); /* paths where "More" was clicked */
+  const INITIAL_SHOW=5;
   const rootRef=useRef(null);
 
   const preserveScroll=cb=>{
@@ -36,8 +39,13 @@ export default function YamlTreeEditor({ yamlText="", onChange }){
     requestAnimationFrame(()=>{if(rootRef.current)rootRef.current.scrollTop=y;});
   };
 
-  const toggle=path=>preserveScroll(()=>setExp(s=>{
-    const n=new Set(s);n.has(path)?n.delete(path):n.add(path);return n;}));
+  const toggle=path=>preserveScroll(()=>{
+    setExp(s=>{const n=new Set(s);n.has(path)?n.delete(path):n.add(path);return n;});
+    setShowAll(s=>{const n=new Set(s);n.delete(path);return n;});
+  });
+
+  const revealMore=path=>preserveScroll(()=>
+    setShowAll(s=>{const n=new Set(s);n.add(path);return n;}));
 
   const write=(arr,val)=>preserveScroll(()=>{
     const nxt=clone(tree);let ptr=nxt;arr.slice(0,-1).forEach(k=>ptr=ptr[k]);
@@ -72,15 +80,30 @@ export default function YamlTreeEditor({ yamlText="", onChange }){
             {isArr&&` [${v.length}]`}
           </div>
 
-          {open&&(
-            isObj
-              ?Object.entries(v).map(([ck,cv])=>(
-                 <Node key={ck} k={ck} v={cv} depth={depth+1} path={`${path}.${ck}`}/>
-               ))
-              :v.map((item,i)=>(
-                 <Node key={i} k={i} v={item} depth={depth+1} path={`${path}.${i}`}/>
-               ))
-          )}
+          {open&&(()=>{
+            const all=isObj
+              ?Object.entries(v).map(([ck,cv])=>({key:ck,k:ck,v:cv,path:`${path}.${ck}`}))
+              :v.map((item,i)=>({key:i,k:i,v:item,path:`${path}.${i}`}));
+            const limited=!showAll.has(path)&&all.length>INITIAL_SHOW;
+            const visible=limited?all.slice(0,INITIAL_SHOW):all;
+            return(
+              <>
+                {visible.map(n=>(
+                  <Node key={n.key} k={n.k} v={n.v} depth={depth+1} path={n.path}/>
+                ))}
+                {limited&&(
+                  <div style={{paddingLeft:(depth+1)*16,padding:".25rem 0 .25rem "+((depth+1)*16)+"px"}}>
+                    <button
+                      className="btn-secondary yaml-more-btn"
+                      onClick={e=>{e.stopPropagation();revealMore(path);}}
+                    >
+                      More ({all.length-INITIAL_SHOW} remaining)
+                    </button>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       );
     }

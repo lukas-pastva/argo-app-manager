@@ -460,6 +460,11 @@ body.modal-open{overflow:hidden;}
 
 .yaml-tree-container{margin-bottom:2rem;}
 
+.yaml-more-btn{
+  font-size:.78rem;padding:.2rem .7rem;margin:.15rem 0;
+  cursor:pointer;
+}
+
 /* ────────────────────────────────────────────────────────────────
    FULLSCREEN FABS (Monaco & Tree)
    ────────────────────────────────────────────────────────────── */
