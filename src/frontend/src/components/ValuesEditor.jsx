@@ -170,12 +170,8 @@ export default function ValuesEditor({
         owner : chart.repoName,
       };
       if (isGitHub) {
-        payload.source       = "github";
-        payload.githubUrl    = chart.githubUrl;
-        payload.githubBranch = chart.githubBranch;
-        payload.chartPath    = chart.chartPath;
-        delete payload.repo;
-        delete payload.owner;
+        payload.repo         = chart._rawGhUrl || chart.githubUrl;
+        payload.owner        = (chart.githubUrl || "").split("/").filter(Boolean).pop() || "";
       }
     } else {
       let release, namespace, extra = {};
@@ -202,12 +198,8 @@ export default function ValuesEditor({
           btoa(unescape(encodeURIComponent(deltaStr))),
       };
       if (isGitHub) {
-        payload.source       = "github";
-        payload.githubUrl    = chart.githubUrl;
-        payload.githubBranch = chart.githubBranch;
-        payload.chartPath    = chart.chartPath;
-        delete payload.repo;
-        delete payload.owner;
+        payload.repo         = chart._rawGhUrl || chart.githubUrl;
+        payload.owner        = (chart.githubUrl || "").split("/").filter(Boolean).pop() || "";
       }
     }
 
