@@ -48,9 +48,11 @@ export default function ValuesEditor({
 }) {
   const style = installStyle === "trio" ? "trio" : "name";
 
+  const isGitHub = chart.source === "github";
+
   /* basic state ------------------------------------------------ */
   const [versions, setVers] = useState([]);
-  const [ver, setVer]       = useState("");
+  const [ver, setVer]       = useState(isGitHub ? (chart.chartVersion || "") : "");
   const [initVals, setInit] = useState("");
   const [busy, setBusy]     = useState(true);
 
@@ -75,10 +77,10 @@ export default function ValuesEditor({
   const ymlRef   = useRef("");
 
   /* ════════════════════════════════════════════════════════════
-     1.  Versions
+     1.  Versions  (skip for GitHub-sourced charts)
      ═══════════════════════════════════════════════════════════ */
   useFetch(
-    `/api/chart/versions?owner=${encodeURIComponent(chart.repoName)}&chart=${encodeURIComponent(chart.name)}`,
+    isGitHub ? null : `/api/chart/versions?owner=${encodeURIComponent(chart.repoName)}&chart=${encodeURIComponent(chart.name)}`,
     [chart.name, chart.repoName],
     (arr = []) => {
       setVers(arr);
@@ -90,14 +92,15 @@ export default function ValuesEditor({
      2.  Fetch default values on version change
      ═══════════════════════════════════════════════════════════ */
   useEffect(() => {
-    if (!ver) return;
+    if (!ver && !isGitHub) return;
     let cancel = false;
     (async () => {
       setBusy(true);
       try {
-        const yml = await fetchSmart(
-          `/api/chart/values?pkgId=${chart.packageId}&version=${ver}`,
-        );
+        const url = isGitHub
+          ? `/api/github/chart-values?url=${encodeURIComponent(chart._rawGhUrl)}`
+          : `/api/chart/values?pkgId=${chart.packageId}&version=${ver}`;
+        const yml = await fetchSmart(url);
         if (!cancel) {
           setInit(yml);
           ymlRef.current = yml;
@@ -113,7 +116,7 @@ export default function ValuesEditor({
       } finally { if (!cancel) setBusy(false); }
     })();
     return () => { cancel = true; };
-  }, [chart.packageId, ver, friendly]);
+  }, [chart.packageId, chart._rawGhUrl, ver, friendly, isGitHub]);
 
   /* ════════════════════════════════════════════════════════════
      3.  Monaco lifecycle
@@ -162,10 +165,18 @@ export default function ValuesEditor({
     if (downloadOnly) {
       payload = {
         chart : chart.name,
-        version: ver,
+        version: ver || chart.chartVersion || "",
         repo  : chart.repoURL,
         owner : chart.repoName,
       };
+      if (isGitHub) {
+        payload.source       = "github";
+        payload.githubUrl    = chart.githubUrl;
+        payload.githubBranch = chart.githubBranch;
+        payload.chartPath    = chart.chartPath;
+        delete payload.repo;
+        delete payload.owner;
+      }
     } else {
       let release, namespace, extra = {};
       if (style === "name") {
@@ -180,7 +191,7 @@ export default function ValuesEditor({
       const deltaStr = (preview?.delta || "").trim() || "# (no overrides)";
       payload = {
         chart   : chart.name,
-        version : ver,
+        version : ver || chart.chartVersion || "",
         repo    : chart.repoURL,
         owner   : chart.repoName,
         release,
@@ -190,6 +201,14 @@ export default function ValuesEditor({
           deltaStr === "# (no overrides)" ? "" :
           btoa(unescape(encodeURIComponent(deltaStr))),
       };
+      if (isGitHub) {
+        payload.source       = "github";
+        payload.githubUrl    = chart.githubUrl;
+        payload.githubBranch = chart.githubBranch;
+        payload.chartPath    = chart.chartPath;
+        delete payload.repo;
+        delete payload.owner;
+      }
     }
 
     const endpoint = downloadOnly ? "/api/download" : "/api/apps";
@@ -292,9 +311,12 @@ export default function ValuesEditor({
         )}
         <div style={{ minWidth: 0 }}>
           <h2 style={{ margin: 0 }}>{chart.displayName || chart.name}</h2>
-          {chart.repoName && (
+          {(chart.repoName || isGitHub) && (
             <p style={{ margin: ".1rem 0 0", fontSize: ".83rem", color: "var(--text-light)" }}>
-              {chart.repoName}{chart.latest ? ` · latest ${chart.latest}` : ""}
+              {isGitHub
+                ? <>{chart.githubUrl} <span style={{ opacity: .6 }}>· {chart.githubBranch} · {chart.chartPath}</span></>
+                : <>{chart.repoName}{chart.latest ? ` · latest ${chart.latest}` : ""}</>
+              }
             </p>
           )}
           {chart.description && (
@@ -328,7 +350,14 @@ export default function ValuesEditor({
 
       {/* version select */}
       <label>Version</label>
-      {versions.length ? (
+      {isGitHub ? (
+        <input
+          value={ver}
+          readOnly
+          style={{ width: "100%", padding: ".55rem .8rem", opacity: .8 }}
+          title="Version from Chart.yaml in the GitHub repository"
+        />
+      ) : versions.length ? (
         <select value={ver} onChange={e => setVer(e.target.value)}>
           {versions.map(v => (
             <option key={v.version} value={v.version}>

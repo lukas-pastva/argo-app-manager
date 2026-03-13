@@ -65,7 +65,7 @@ app.use(
         styleSrc   : ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         fontSrc    : ["'self'", "https://fonts.gstatic.com"],
         imgSrc     : ["'self'", "data:", "https://artifacthub.io"],
-        connectSrc : ["'self'", "https://artifacthub.io"],
+        connectSrc : ["'self'", "https://artifacthub.io", "https://raw.githubusercontent.com"],
         objectSrc  : ["'none'"],
       },
     },
@@ -78,6 +78,61 @@ app.get("/favicon.ico", (_q, r) => r.status(204).end());
 
 /* ────────── detect style once on boot (skip in download-only) ─ */
 if (!cfg.downloadOnly) detectStyle().catch(() => {});
+
+/* ════════════════════════════════════════════════════════════════
+   GitHub URL helpers
+   ═══════════════════════════════════════════════════════════════ */
+function parseGitHubUrl(url) {
+  // https://github.com/owner/repo/tree/branch/path/to/chart
+  const m = url.match(/github\.com\/([^/]+)\/([^/]+)\/tree\/([^/]+)\/(.+)/);
+  if (!m) return null;
+  return { owner: m[1], repo: m[2], branch: m[3], chartPath: m[4].replace(/\/+$/, "") };
+}
+
+function rawGitHubUrl({ owner, repo, branch, chartPath }, file) {
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${chartPath}/${file}`;
+}
+
+/* ── fetch Chart.yaml from a GitHub URL ──────────────────────── */
+app.get("/api/github/chart-info", async (req, res) => {
+  const parsed = parseGitHubUrl(req.query.url || "");
+  if (!parsed) return res.status(400).json({ error: "Invalid GitHub URL. Expected: https://github.com/<owner>/<repo>/tree/<branch>/<path>" });
+
+  try {
+    const { data } = await axios.get(rawGitHubUrl(parsed, "Chart.yaml"), { timeout: 10_000, responseType: "text" });
+    const chart = yaml.load(data) || {};
+    console.log(`[github] Chart.yaml for ${parsed.owner}/${parsed.repo}:${parsed.chartPath} → ${chart.name}@${chart.version}`);
+    res.json({
+      name        : chart.name        || parsed.chartPath.split("/").pop(),
+      displayName : chart.name        || parsed.chartPath.split("/").pop(),
+      description : chart.description || "",
+      version     : chart.version     || "0.0.0",
+      appVersion  : chart.appVersion  || "",
+      home        : chart.home        || "",
+      source      : "github",
+      githubUrl   : `https://github.com/${parsed.owner}/${parsed.repo}`,
+      githubBranch: parsed.branch,
+      chartPath   : parsed.chartPath,
+    });
+  } catch (e) {
+    console.error("[github] chart-info error:", e.message);
+    res.status(502).json({ error: `Could not fetch Chart.yaml: ${e.message}` });
+  }
+});
+
+/* ── fetch values.yaml from a GitHub URL ─────────────────────── */
+app.get("/api/github/chart-values", async (req, res) => {
+  const parsed = parseGitHubUrl(req.query.url || "");
+  if (!parsed) return res.status(400).json({ error: "Invalid GitHub URL" });
+
+  try {
+    const { data } = await axios.get(rawGitHubUrl(parsed, "values.yaml"), { timeout: 10_000, responseType: "text" });
+    res.type("text/yaml").send(data);
+  } catch (e) {
+    console.warn("[github] values.yaml error:", e.message);
+    res.type("text/yaml").send("# (no default values found)");
+  }
+});
 
 /* ════════════════════════════════════════════════════════════════
    0.  Expose detected style
